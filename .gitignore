@@ -1,0 +1,7 @@
+.idea
+__pycache__
+tmp/*
+*/logs*/*
+*/data/*
+bin/*
+experiments-*/*

@@ -1,0 +1,7 @@
+// Constants for reward bounds
+const int B1;
+const int B2;
+const int B3;
+
+"rbrmax3": Pmax=? [F{"value"}>=B1,{"time"}<=B2,{"energy"}<=B3 done];
+"unrmax": Pmax=? [F done];

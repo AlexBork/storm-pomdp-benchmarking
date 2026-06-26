@@ -1,0 +1,105 @@
+// Example of a robot moving on a grid with a water obstacle
+// The objective is to maximise the probability of repeatedly oscillating between home and goal position a given number of times while respecting an energy constraint
+// The robot can move north, south, east or west
+// The water tiles are either deep or shallow, causing different energy costs
+// Additionally, with some probability, the water level is low, causing crossing to be easier
+// The water level is rerolled each time the robot reaches home again after reaching the goal 
+// Sketch
+// Goal ---- ----
+// Deep Shal ----
+// Home ---- ----
+// Example Property: Pmax=? [F{"energy"}<=24,{"homeReached"}>=2 true]
+
+pomdp
+
+// Constants that should technically be changeable (changeability of N might depend on map description)
+const int N = 3;
+const double slippery = 0;
+const double lowWaterLevelProb = 0.5;
+
+// General stuff
+const int xMIN = 0;
+const int xMAX = N-1;
+const int yMIN = 0;
+const int yMAX = N-1;
+
+formula deepWater = (x=0 & y=1);
+formula shallowWater = (x=1 & y=1);
+
+formula onWater = deepWater | shallowWater;
+
+formula goalNorth = (y=1 & x=0);
+formula goalWest = (y=2 & x=1);
+
+formula homeSouth = (y=1 & x=0);
+formula homeWest = (y=0 & x=1);
+
+// Location of goal & home
+formula goal = (x = 0) & (y = yMAX);
+formula home = (x = 0) & (y = 0);
+
+// Observables
+observable "goal" = goal;
+observable "wayHome" = wayHome;
+observable "home" = home;
+
+module robot
+  x : [xMIN..xMAX] init xMIN; // x coordinate, min is west, max is east
+  y : [yMIN..yMAX] init yMIN; // y coordinate, min is south, max is north
+  lowWaterLevel : bool init false;
+  wayHome : bool init true;
+
+  [flip] wayHome & home -> lowWaterLevelProb: (wayHome'=false) & (lowWaterLevel'=true) + (1-lowWaterLevelProb): (wayHome'=false) & (lowWaterLevel'=false);
+
+  [north] !(wayHome & home) & !goalNorth -> slippery: (y'=y) + (1-slippery): (y'=min(y+1, yMAX));
+  [north] !(wayHome & home) & goalNorth -> slippery: (y'=y) + (1-slippery): (y'=min(y+1, yMAX)) & (wayHome'=true);
+
+  [east] !(wayHome & home) -> slippery: (x'=x) + (1-slippery): (x'=min(x+1, xMAX));
+
+  [west] !(wayHome & home) & !goalWest -> slippery: (x'=x) + (1-slippery): (x'=max(x-1, xMIN));
+  [west] !(wayHome & home) & goalWest -> slippery: (x'=x) + (1-slippery): (x'=max(x-1, xMIN)) & (wayHome'=true);
+
+  [south] !(wayHome & home) -> slippery: (y'=y) + (1-slippery): (y'=max(y-1, yMIN));
+endmodule
+
+
+// Rewards
+
+rewards "steps"
+  [north] true : 1;
+  [east] true : 1;
+  [south] true : 1;
+  [west] true : 1;
+endrewards
+
+rewards "energy"
+  [north] (deepWater & lowWaterLevel) | (shallowWater & !lowWaterLevel)  : 6;
+  [east]  (deepWater & lowWaterLevel) | (shallowWater & !lowWaterLevel)  : 6;
+  [south]  (deepWater & lowWaterLevel) | (shallowWater & !lowWaterLevel)  : 6;
+  [west]  (deepWater & lowWaterLevel) | (shallowWater & !lowWaterLevel)  : 6;
+
+  [north] (shallowWater & lowWaterLevel)  : 2;
+  [east]  (shallowWater & lowWaterLevel)  : 2;
+  [south]  (shallowWater & lowWaterLevel)  : 2;
+  [west]  (shallowWater & lowWaterLevel)  : 2;
+
+  [north] (deepWater & !lowWaterLevel)  : 10;
+  [east]  (deepWater & !lowWaterLevel)  : 10;
+  [south]  (deepWater & !lowWaterLevel)  : 10;
+  [west]  (deepWater & !lowWaterLevel)  : 10;
+
+  [north] !deepWater & !shallowWater : 1;
+  [east]  !deepWater & !shallowWater : 1;
+  [south] !deepWater & !shallowWater : 1;
+  [west]  !deepWater & !shallowWater : 1;
+endrewards
+
+rewards "homeReached"
+  [west]  wayHome & homeWest : 1;
+  [south] wayHome & homeSouth : 1;
+endrewards
+
+
+// Labels
+label "goal" = goal;
+label "home" = home;

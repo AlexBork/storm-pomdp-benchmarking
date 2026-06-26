@@ -1,0 +1,33 @@
+// Random walk model to showcase increasing bounds can lead to convergence to unbounded value
+// The model has a single agent that can move right. The move is successful with probability movep.
+// At any point, the agent can decide to observe its current position. With probability obsp, the observation is successful.
+// At any point, the agent can decide to stop. If the agent stops at position N-1, it reaches the goal (N+2), otherwise it falls into a trap.
+// Observation costs 1 unit
+pomdp
+
+// Constants
+const int N; // number of states in the walk
+const double movep = 0.5; // probability of successful move
+const double obsp = 0.1; // probability of successful observation
+
+observable "observed" = observedX; // Observations are the current observed position
+
+module move
+  x : [0..N+2] init 0; // 
+  observedX : [0..N+3] init N+3; // Observations 0..N+2 are for observing the state, N+3 is the "state unobserved" observation
+
+  [observe] observedX = N+3 -> obsp: (x'=x) & (observedX'=x) + (1-obsp): (x'=x) & (observedX'=N+3);
+  [move] x<=N -> movep: (x'=min(x+1,N)) & (observedX'=N+3) + (1-movep): (x'=x) & (observedX'=N+3);
+  [stop] x!=N-1 -> 1: (x'=N+1) & (observedX'=N+1);
+  [stop] x=N-1 -> 1: (x'=N+2) & (observedX'=N+2);
+endmodule
+
+
+// Rewards
+rewards "obsCost"
+  [observe] true : 1;
+endrewards
+
+// Labels
+label "goal" = x=N+2;
+label "trap" = x=N+1;

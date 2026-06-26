@@ -1,0 +1,98 @@
+// Simplified POMDP model of a mars rover
+// Original MDP encoding by Tim Quatmann and Sebastian Junges
+// POMDP version by Tim Quatmann and Alexander Bork
+// RWTH Aachen University
+//
+// The aim is to schedule experiments for a rover. Experiments vary in success probability, time, energy consumption and (scientific) value.
+// It is not observable if an experiment has been a success.
+
+
+pomdp
+
+observables
+	task, done, increased_energy
+endobservables 
+
+const int num_tasks = 4;
+
+// time (in minutes)
+const double time_low = 5;
+const double time_medium = 8;
+const double time_high = 10;
+
+// Energy (in percent)
+const double energy_low = 3;
+const double energy_medium = 5;
+const double energy_high = 7; 
+
+// Scientific Value
+const double value_low = 2;
+const double value_medium = 10;
+const double value_high = 30;
+
+// Success probabilities
+const double task1_success_pr = 0.5;
+const double task2_success_pr = 0.6;
+const double task3_success_pr = 0.8;
+const double task4_success_pr = 0.2;
+
+formula low_time_task = (task=2 | task=3);
+formula medium_time_task = false;
+formula high_time_task = (task=1 | task=4);
+
+formula low_energy_task = (task=1 | task=3);
+formula medium_energy_task = (task=2);
+formula high_energy_task = (task=4);
+
+formula low_value_task = (task=3);
+formula medium_value_task = (task=1 | task=2);
+formula high_value_task = (task=4);
+
+module rover
+	// The current task (0 means no task)
+	task : [0..num_tasks] init 0;
+	success : bool init false;
+	done : bool init false;
+	
+	[task1_start] task=0 & !done -> task1_success_pr : (task'=1) & (success'=true) + (1-task1_success_pr) : (task'=1) & (success'=false);
+	[task2_start] task=0 & !done -> task2_success_pr : (task'=2) & (success'=true) + (1-task2_success_pr) : (task'=2) & (success'=false);
+	[task3_start] task=0 & !done -> task3_success_pr : (task'=3) & (success'=true) + (1-task3_success_pr) : (task'=3) & (success'=false);
+	[task4_start] task=0 & !done -> task4_success_pr : (task'=4) & (success'=true) + (1-task4_success_pr) : (task'=4) & (success'=false);
+
+	[task_done] task>0 & !done -> (task'= 0) & (success'=false);
+	
+	[done] task=0 -> (done' = true); 
+endmodule
+
+
+module battery
+	increased_energy : bool init false;
+	
+	[task1_start] true -> 0.5 : (increased_energy' = false) + (0.5) : (increased_energy' = true);
+	[task2_start] true -> 0.5 : (increased_energy' = false) + (0.5) : (increased_energy' = true);
+	[task3_start] true -> 0.5 : (increased_energy' = false) + (0.5) : (increased_energy' = true);
+	[task4_start] true -> (increased_energy' = false);
+	[task_done] true -> (increased_energy' = false);
+endmodule
+ 
+
+rewards "time"
+	[task_done] low_time_task : time_low;
+	[task_done] medium_time_task : time_medium;
+	[task_done] high_time_task : time_high;
+endrewards
+
+rewards "energy"
+	[task_done] low_energy_task & !increased_energy : energy_low;
+	[task_done] low_energy_task &  increased_energy : energy_medium;
+	[task_done] medium_energy_task & !increased_energy : energy_medium;
+	[task_done] medium_energy_task &  increased_energy : energy_high;
+	[task_done] high_energy_task & !increased_energy : energy_high;
+	[task_done] high_energy_task &  increased_energy : energy_high;
+endrewards
+
+rewards "value"
+	[task_done] low_value_task & success : value_low;
+	[task_done] medium_value_task & success : value_medium;
+	[task_done] high_value_task & success : value_high;
+endrewards

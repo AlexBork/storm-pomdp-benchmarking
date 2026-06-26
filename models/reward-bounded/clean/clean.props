@@ -1,0 +1,8 @@
+// Constants for reward bounds
+const int B1;
+const int B2;
+
+// The maximal probability to clean more than B2 tiles within a given energy budget B1
+"rbrmax2": Pmax=? [F{"energy"}<=B1,{"clean"}>B2 "goal"];
+
+"unrmax": Pmax=? [F "goal"];

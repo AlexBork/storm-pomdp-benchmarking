@@ -1,0 +1,59 @@
+// Model of a 1-D hallway consisting of N initially dirty tiles that should be cleaned by a cleaning robot.
+// Starting at tile 0, the robot has two actions, clean and next.
+// Action `clean` cleans a certain tile with probability p_clean and requires 4 energy units with probability p_high_energy and 2 energy units otherwise.
+// Action `next` moves to the next tile and always requires 1 energy unit.
+
+// To model the probabilistic energy consumption, we introduce a variable `cleaning_energy`. This adds extra states at which the reward is collected through the consume action.
+
+
+pomdp
+
+// Constants
+const int N; // number of tiles
+const int lvl1; // energy level width
+const int lvl2; // unused, but needed for script compatibility
+
+const double p_clean = 0.8; // probability of successful clean
+const double p_high_energy = 0.5; // probability of higher energy consumption when performing clean action
+
+observable "consuming" = cleaning_energy!=0; // we're in an auxiliary state where the energy for cleaning needs to be consumed
+
+module agent
+  x : [0..N] init 0; // Position of the agent, x=N is the target location and does not correspond to a tile
+  cleaning_energy : [0..4] init 0; // Energy consumed by the agent
+
+  [clean] x<N & cleaning_energy=0 -> p_high_energy: (cleaning_energy'=4) + (1-p_high_energy): (cleaning_energy'=2);
+  [move] x<N & cleaning_energy=0 -> 1: (x'=x+1);
+  [clean] x=N & cleaning_energy=0 -> (cleaning_energy'=0); // no-op
+  [move] x=N & cleaning_energy=0 -> (cleaning_energy'=0); // no-op
+  [consume] cleaning_energy!=0 -> 1: (cleaning_energy'=0);
+endmodule
+
+module currentTile
+  is_dirty : bool init true; // Is the tile dirty?
+  [clean] x<N -> p_clean: (is_dirty'=false) + (1-p_clean): true; // clean tile with probability p_clean, otherwise don't change dirty state
+  [clean] x=N -> true; // no-op (location x=N remains dirty)
+  [move] true -> 1: (is_dirty'=true);
+endmodule
+
+observable "lvl" = lvl_incr; // Observation comes from collected rewards
+module energy_obs
+	lvl_incr : [0..5] init 0; // Energy level increment (5 is the max. energy consumed in one step)
+	lvl_hidden : [0..lvl1-1] init lvl1-1; // internal level state
+	[consume] true -> 1: (lvl_hidden'=mod(lvl_hidden + cleaning_energy, lvl1)) & (lvl_incr'=floor((lvl_hidden + cleaning_energy)/lvl1));
+	[move] true -> 1: (lvl_hidden'=mod(lvl_hidden + 1, lvl1)) & (lvl_incr'=floor((lvl_hidden + 1)/lvl1));
+endmodule
+
+
+// Rewards
+rewards "energy"
+  [consume] true : cleaning_energy;
+  [move] true : 1;
+endrewards
+
+// Rewards
+rewards "clean"
+  [move] x<N & !is_dirty : 1;
+endrewards
+
+label "goal" = x=N;

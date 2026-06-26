@@ -1,0 +1,156 @@
+// Resource Gathering Task with Moving Enemy
+// inspired by Vamplev et al. "Empirical evaluation methods for multiobjective reinforcement learning algorithms"
+// 5x5 grid with gold and gem resources that need to be collected and brought home
+// An enemy moves randomly along the diagonal, attacking the robot if they meet
+// If the robot is attacked, it loses all resources it currently carries and is placed back at the home position
+// The robot can observe everything about itself, but not the enemy and its intent
+//
+// Example property: Pmax=? [F{"gold"}>1,{"gem"}>1,{"steps"}<=100 true]
+
+pomdp
+
+observables
+	x,y,gold,gem,attacked
+endobservables
+
+const int WIDTH = 5;
+const int HEIGHT = 5;
+const int XINIT = 3;
+const int YINIT = 1;
+
+const double pAttack = 1;
+const double pEnemyMoves = 1;
+
+formula left_of_gold = x=2 & y=5;
+formula right_of_gold = x=4 & y=5;
+formula below_of_gold = (x=3 & y=4);
+formula above_of_gold = false;
+formula left_of_gem = (x=4 & y=4);
+formula right_of_gem = false;
+formula below_of_gem = (x=5 & y=3);
+formula above_of_gem = (x=5 & y=5);
+formula left_of_home = x=2 & y=1;
+formula right_of_home = x=4 & y=1;
+formula above_of_home = x=3 & y=2;
+formula below_of_home = false;
+
+observable "enemyNorth" = enemy_x = x & enemy_y = y+1;
+observable "enemyEast" = enemy_x = x+1 & enemy_y = y;
+observable "enemySouth" = enemy_x = x & enemy_y = y-1;
+observable "enemyWest" = enemy_x = x-1 & enemy_y = y;
+
+module robot
+	gold : bool init false;
+	gem : bool init false;
+	attacked : bool init false;
+
+	x : [0..WIDTH] init 0;
+	y : [0..HEIGHT] init 0;
+
+	[place] x=0 & y=0 -> (x'=XINIT) & (y'=YINIT);
+
+	[right] (x+1!=enemy_intent_x | y!=enemy_intent_y) & x>0 & x<WIDTH ->  (attacked'=false) & (x'=x+1) & (gold' = (gold & !left_of_home) | left_of_gold)   &  (gem' =  (gem & !left_of_home) | left_of_gem);
+	[left] (x-1!=enemy_intent_x | y!=enemy_intent_y) & x>1 ->      (attacked'=false) & (x'=x-1) & (gold' = (gold & !right_of_home) | right_of_gold) & (gem' =  (gem & !right_of_home) | right_of_gem);
+	[up] (x!=enemy_intent_x | y+1!=enemy_intent_y) & y<HEIGHT & y>0 ->  (attacked'=false) & (y'=y+1) & (gold' = (gold & !below_of_home) | below_of_gold) & (gem' =  (gem & !below_of_home) | below_of_gem);
+	[down] (x!=enemy_intent_x | y-1!=enemy_intent_y) & y>1 ->      (attacked'=false) & (y'=y-1) & (gold' = (gold & !above_of_home) | above_of_gold) & (gem' =  (gem & !above_of_home) | above_of_gem);
+
+	[right] x+1=enemy_intent_x & y=enemy_intent_y  & x>0 & x<WIDTH -> pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (x'=x+1) & (gold' = (gold & !left_of_home) | left_of_gold) & (gem' =  (gem & !left_of_home) | left_of_gem);
+	[left] x-1=enemy_intent_x & y=enemy_intent_y & x>1 ->     pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (x'=x-1) & (gold' = (gold & !right_of_home) | right_of_gold) & (gem' =  (gem & !right_of_home) | right_of_gem);
+	[up] x=enemy_intent_x & y+1=enemy_intent_y & y>0 & y<HEIGHT -> pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (y'=y+1) & (gold' = (gold & !below_of_home) | below_of_gold) & (gem' =  (gem & !below_of_home) | below_of_gem);
+	[down] x=enemy_intent_x & y-1=enemy_intent_y & y>1 ->     pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (y'=y-1) & (gold' = (gold & !above_of_home) | above_of_gold) & (gem' =  (gem & !above_of_home) | above_of_gem);
+
+	[right] (x!=enemy_intent_x | y!=enemy_intent_y) & x=WIDTH ->  (attacked'=false) & (x'=x) & (gold' = (gold & !left_of_home) | left_of_gold)   &  (gem' =  (gem & !left_of_home) | left_of_gem);
+	[left] (x!=enemy_intent_x | y!=enemy_intent_y) & x=1 ->      (attacked'=false) & (x'=x) & (gold' = (gold & !right_of_home) | right_of_gold) & (gem' =  (gem & !right_of_home) | right_of_gem);
+	[up] (x!=enemy_intent_x | y!=enemy_intent_y) & y=HEIGHT ->  (attacked'=false) & (y'=y) & (gold' = (gold & !below_of_home) | below_of_gold) & (gem' =  (gem & !below_of_home) | below_of_gem);
+	[down] (x!=enemy_intent_x | y!=enemy_intent_y) & y=1 ->      (attacked'=false) & (y'=y) & (gold' = (gold & !above_of_home) | above_of_gold) & (gem' =  (gem & !above_of_home) | above_of_gem);
+
+	[right] x=enemy_intent_x & y=enemy_intent_y  & x=WIDTH -> pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (x'=x) & (gold' = (gold & !left_of_home) | left_of_gold) & (gem' =  (gem & !left_of_home) | left_of_gem);
+	[left] x=enemy_intent_x & y=enemy_intent_y & x=1 ->     pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (x'=x) & (gold' = (gold & !right_of_home) | right_of_gold) & (gem' =  (gem & !right_of_home) | right_of_gem);
+	[up] x=enemy_intent_x & y=enemy_intent_y & y=HEIGHT -> pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (y'=y) & (gold' = (gold & !below_of_home) | below_of_gold) & (gem' =  (gem & !below_of_home) | below_of_gem);
+	[down] x=enemy_intent_x & y=enemy_intent_y & y=1 ->     pAttack : (attacked'=true) & (x'=XINIT) & (y'=YINIT) & (gold'=false) & (gem'=false) + (1-pAttack) : (attacked'=false) & (y'=y) & (gold' = (gold & !above_of_home) | above_of_gold) & (gem' =  (gem & !above_of_home) | above_of_gem);
+endmodule
+
+module enemy
+	enemy_x : [0..WIDTH] init 0;
+	enemy_y : [0..HEIGHT] init 0;
+
+	enemy_intent_x : [0..WIDTH] init 0;
+	enemy_intent_y : [0..HEIGHT] init 0;
+
+	// Deterministic placement in (1,1)
+	[place] enemy_x=0 & enemy_y=0 -> (1-pEnemyMoves): (enemy_x'=1) & (enemy_y'=1) & (enemy_intent_x' = 1) & (enemy_intent_y' = 1) +
+								 	pEnemyMoves: (enemy_x'=1) & (enemy_y'=1) & (enemy_intent_x' = 2) & (enemy_intent_y' = 2);
+
+	// Random placement
+	//[place] enemy_x=0 & enemy_y=0 -> 1/10: (enemy_x'=1) & (enemy_y'=1) & (enemy_intent_x' = 1) & (enemy_intent_y' = 1) +
+	//							 	1/10: (enemy_x'=1) & (enemy_y'=1) & (enemy_intent_x' = 2) & (enemy_intent_y' = 2) +
+	//								1/15: (enemy_x'=2) & (enemy_y'=2) & (enemy_intent_x' = 1) & (enemy_intent_y' = 1) +
+	//							 	1/15: (enemy_x'=2) & (enemy_y'=2) & (enemy_intent_x' = 2) & (enemy_intent_y' = 2) +
+	//							 	1/15: (enemy_x'=2) & (enemy_y'=2) & (enemy_intent_x' = 3) & (enemy_intent_y' = 3) +
+	//								1/15: (enemy_x'=3) & (enemy_y'=3) & (enemy_intent_x' = 2) & (enemy_intent_y' = 2) +
+	//								1/15: (enemy_x'=3) & (enemy_y'=3) & (enemy_intent_x' = 3) & (enemy_intent_y' = 3) +
+	//								1/15: (enemy_x'=4) & (enemy_y'=4) & (enemy_intent_x' = 3) & (enemy_intent_y' = 3) +
+	//								1/15: (enemy_x'=4) & (enemy_y'=4) & (enemy_intent_x' = 4) & (enemy_intent_y' = 4) +
+	//								1/15: (enemy_x'=4) & (enemy_y'=4) & (enemy_intent_x' = 5) & (enemy_intent_y' = 5) +
+	//								1/10: (enemy_x'=5) & (enemy_y'=5) & (enemy_intent_x' = 5) & (enemy_intent_y' = 5) +
+	//								1/10: (enemy_x'=5) & (enemy_y'=5) & (enemy_intent_x' = 4) & (enemy_intent_y' = 4);
+
+
+	[right] enemy_intent_x > 1 & enemy_intent_x < WIDTH &  enemy_intent_y > 1 & enemy_intent_y < WIDTH -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+	[left] enemy_intent_x > 1 & enemy_intent_x < WIDTH &  enemy_intent_y > 1 & enemy_intent_y < WIDTH -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+	[up] enemy_intent_x > 1 & enemy_intent_x < WIDTH &  enemy_intent_y > 1 & enemy_intent_y < WIDTH -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+	[down] enemy_intent_x > 1 & enemy_intent_x < WIDTH &  enemy_intent_y > 1 & enemy_intent_y < WIDTH -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1) +
+	pEnemyMoves/2 : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+
+	[right] enemy_intent_x = 1 & enemy_intent_y = 1 -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+	[left] enemy_intent_x = 1 & enemy_intent_y = 1 -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+	[up] enemy_intent_x = 1 & enemy_intent_y = 1 -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+	[down] enemy_intent_x = 1 & enemy_intent_y = 1 -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x+1) & (enemy_intent_y'=enemy_intent_y+1);
+
+	[right] enemy_intent_x = WIDTH & enemy_intent_y = HEIGHT -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1);
+	[left] enemy_intent_x = WIDTH & enemy_intent_y = HEIGHT -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1);
+	[up] enemy_intent_x = WIDTH & enemy_intent_y = HEIGHT -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1);
+	[down] enemy_intent_x = WIDTH & enemy_intent_y = HEIGHT -> (1-pEnemyMoves) : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x) & (enemy_intent_y'=enemy_intent_y) +
+	pEnemyMoves : (enemy_x'=enemy_intent_x) & (enemy_y'=enemy_intent_y) & (enemy_intent_x'=enemy_intent_x-1) & (enemy_intent_y'=enemy_intent_y-1);
+endmodule
+
+rewards "attacks"
+	attacked : 1;
+endrewards
+
+rewards "steps"
+	[left] true : 1;
+	[right] true : 1;
+	[up] true : 1;
+	[down] true : 1;
+endrewards
+
+rewards "gold"
+	[right] left_of_home & gold : 1;
+	[left] right_of_home & gold : 1;
+	[up] below_of_home & gold : 1;
+	[down] above_of_home & gold : 1;
+endrewards
+
+rewards "gem"
+	[right] left_of_home & gem : 1;
+	[left] right_of_home & gem : 1;
+	[up] below_of_home & gem : 1;
+	[down] above_of_home & gem: 1;
+endrewards
+
+	
