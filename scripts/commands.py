@@ -54,7 +54,15 @@ def create_invocations():
         for cmd in get_command_lines(tool_binaries, cfg):
             if not check_execution(cmd): exit(-1)
 
-    bset_selection = input_selection("Benchmark Sets", benchmarks.BENCHMARK_SETS)
+    bset_selection = input_selection(
+        "Benchmark Sets",
+        benchmarks.BENCHMARK_SETS,
+        group_options=OrderedDict([
+            [root, [bset for bset, bset_root in benchmarks.BENCHMARK_SET_ROOTS.items() if bset_root == root]]
+            for root in benchmarks.BENCHMARK_ROOTS
+        ]),
+        group_descriptions=OrderedDict([[root, benchmarks.BENCHMARK_ROOTS[root]] for root in benchmarks.BENCHMARK_ROOTS]),
+    )
     invocations = [OrderedDict(id=get_invocation_id(inst,cfg), instance=inst, configuration=cfg) for inst,cfg in itertools.product(benchmarks.INSTANCES, cfgs) if is_supported(inst, cfg) and inst["benchmark-set"] in bset_selection]
     print(f"Selected {len(invocations)} invocations.")
 
