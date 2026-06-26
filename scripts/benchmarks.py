@@ -22,6 +22,13 @@ BENCHMARK_SETS["rb-bnds"] = ["Reward-bounded bound magnitude experiments"]
 for bset in BENCHMARK_SETS:
     BENCHMARK_SETS[bset].append("{} instances".format(len([i for i in INSTANCES if i["benchmark-set"] == bset])))
 
+BENCHMARK_SET_ROOTS = OrderedDict([[bset, next(i["benchmark-root"] for i in INSTANCES if i["benchmark-set"] == bset)] for bset in BENCHMARK_SETS])
+BENCHMARK_ROOTS = OrderedDict()
+for root in dict.fromkeys([i["benchmark-root"] for i in INSTANCES]):
+    set_count = len([bset for bset, bset_root in BENCHMARK_SET_ROOTS.items() if bset_root == root])
+    instance_count = len([i for i in INSTANCES if i["benchmark-root"] == root])
+    BENCHMARK_ROOTS[root] = [f"{root.replace('-', ' ').title()} benchmarks", f"{set_count} sets", f"{instance_count} instances"]
+
 def get_full_model_filename(inst):
     return os.path.join(MODELS_DIR, inst["benchmark-root"], inst["model"]["file"])
 

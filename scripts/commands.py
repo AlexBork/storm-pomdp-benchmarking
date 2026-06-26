@@ -47,14 +47,31 @@ def create_invocations():
         tool_configs += tools.TOOL_NAMES[t].CONFIGS
 
     cfg_options = OrderedDict([[c["id"], c["notes"]] for c in tool_configs])
-    cfg_selection = input_selection("Tool Configurations", cfg_options)
+    cfg_group_options = OrderedDict()
+    cfg_group_descriptions = OrderedDict()
+    for t in tool_selection:
+        for group_name, group_members in tools.TOOL_NAMES[t].CONFIG_GROUPS.items():
+            members = [cfg_id for cfg_id in group_members if cfg_id in cfg_options]
+            if len(members) == 0:
+                continue
+            cfg_group_options[group_name] = members
+            cfg_group_descriptions[group_name] = tools.TOOL_NAMES[t].CONFIG_GROUP_DESCRIPTIONS[group_name]
+    cfg_selection = input_selection("Tool Configurations", cfg_options, group_options=cfg_group_options, group_descriptions=cfg_group_descriptions)
     cfgs = [c for c in tool_configs if c["id"] in cfg_selection]
     print(f"Selected {len(cfgs)} Tool configurations.")
     for cfg in cfgs:
         for cmd in get_command_lines(tool_binaries, cfg):
             if not check_execution(cmd): exit(-1)
 
-    bset_selection = input_selection("Benchmark Sets", benchmarks.BENCHMARK_SETS)
+    bset_selection = input_selection(
+        "Benchmark Sets",
+        benchmarks.BENCHMARK_SETS,
+        group_options=OrderedDict([
+            [root, [bset for bset, bset_root in benchmarks.BENCHMARK_SET_ROOTS.items() if bset_root == root]]
+            for root in benchmarks.BENCHMARK_ROOTS
+        ]),
+        group_descriptions=OrderedDict([[root, benchmarks.BENCHMARK_ROOTS[root]] for root in benchmarks.BENCHMARK_ROOTS]),
+    )
     invocations = [OrderedDict(id=get_invocation_id(inst,cfg), instance=inst, configuration=cfg) for inst,cfg in itertools.product(benchmarks.INSTANCES, cfgs) if is_supported(inst, cfg) and inst["benchmark-set"] in bset_selection]
     print(f"Selected {len(invocations)} invocations.")
 

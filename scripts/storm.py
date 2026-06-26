@@ -131,6 +131,20 @@ CONFIGS.append(seq_fully_obs)
 
 CONFIGS = sorted(CONFIGS, key=lambda x: x["id"])
 
+CONFIG_GROUPS = OrderedDict()
+CONFIG_GROUPS["regd"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("regd")]
+CONFIG_GROUPS["regbelseq"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("regbelseqc") or cfg["id"].startswith("regbelseqd")]
+CONFIG_GROUPS["belseq"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("belseqc") or cfg["id"].startswith("belseqd")]
+CONFIG_GROUPS["unf"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("caunfc") or cfg["id"].startswith("unfc") or cfg["id"].startswith("caunfd") or cfg["id"].startswith("unfd")]
+CONFIG_GROUPS["mdp"] = [cfg["id"] for cfg in CONFIGS if cfg["id"] == "mdpseq"]
+
+CONFIG_GROUP_DESCRIPTIONS = OrderedDict()
+CONFIG_GROUP_DESCRIPTIONS["regd"] = ["All regular over-approximations"]
+CONFIG_GROUP_DESCRIPTIONS["regbelseq"] = ["All regular sequential configs"]
+CONFIG_GROUP_DESCRIPTIONS["belseq"] = ["All sequential configs"]
+CONFIG_GROUP_DESCRIPTIONS["unf"] = ["All unfolding configs"]
+CONFIG_GROUP_DESCRIPTIONS["mdp"] = ["All fully observable configs"]
+
 META_CONFIG_TIMELIMITS = [1800]
 BASE_CONFIGS = ["unfc", "unfd", "caunfc", "caunfd", "belseqc", "belseqd"] #, "unbc", "unbd"]
 REG_BASE_CONFIGS = ["regd", "regbelseqc", "regbelseqd"]
