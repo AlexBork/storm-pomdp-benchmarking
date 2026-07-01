@@ -9,15 +9,8 @@ def const_def_string(inst):
         values = [f"{p}={pars[p]}" for p in pars if not p.startswith("__lvl")]
         if len(values) != 0: return ",".join(values)
 
-def lvl_width_string(inst):
-    if "open-parameters" in inst["model"]:
-        pars = inst["model"]["open-parameters"]
-        values = [f"{pars[p]}" for p in pars if p.startswith("__lvl")]
-        if len(values) != 0: return ",".join(values)
-
 def get_command_line_args(cfg, inst = None):
     out = []
-    lvl_def = None
     if inst is not None:
         assert inst["model"]["formalism"] == "prism", f"Unhandled model formalism {inst['model']['formalism']} for storm."
         out.append(f"--prism {benchmarks.get_full_model_filename(inst)}")
@@ -25,10 +18,7 @@ def get_command_line_args(cfg, inst = None):
         c = const_def_string(inst)
         if c is not None:
             out.append(f"-const {c}")
-        lvl_def = lvl_width_string(inst)
     out += cfg["cmd"]
-    if lvl_def is not None and "--reward-aware" in cfg["cmd"] and "--check-fully-observable" not in cfg["cmd"]:
-        out[out.index("--reward-aware")] = f"--reward-aware {lvl_def}"
     return " ".join(out)
         
 NAME = "storm"
@@ -41,87 +31,46 @@ CONFIGS = []
 
 base_cfg = OrderedDict()
 base_cfg["tool"] = NAME
-base_cfg["cmd"] = ["--timemem", "--statistics"]
+base_cfg["cmd"] = ["--timemem", "--statistics", "--sound"]
 base_cfg["notes"] = ["Storm-pomdp"]
-base_cfg["supported-obj-types"] = ["rbr"] # the default is to only support reward bounded reachability
+base_cfg["supported-obj-types"] = ["prb", "rew"]
 base_cfg["supported-model-types"] = ["pomdp"]
 base_cfg["supported-model-formalisms"] = ["prism"]
 
-regular_base_cfg = copy.deepcopy(base_cfg)
-regular_base_cfg["supported-obj-types"] = ["prb", "rew"]
-
 for i in range(2, 13):
     for mode in ["static", "dynamic"]:
-        reg_d_cfg = copy.deepcopy(regular_base_cfg)
-        reg_d_cfg["id"] = f"regd{i:02}{mode[0]}"
-        reg_d_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
-        reg_d_cfg["notes"] += [f"Regular over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
-        CONFIGS.append(reg_d_cfg)
+        discr_cfg = copy.deepcopy(base_cfg)
+        discr_cfg["id"] = f"discr{i:02}{mode[0]}"
+        discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
+        discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
+        CONFIGS.append(discr_cfg)
 
 for i in range(8,33):
-    reg_c_cfg = copy.deepcopy(regular_base_cfg)
-    reg_c_cfg["id"] = f'regbelseqc{i:02}'
-    reg_c_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}"]
-    reg_c_cfg["notes"] += [f"Regular sequential approach, with cutoffs and size threshold 2^{i}"]
-    CONFIGS.append(reg_c_cfg)
+    cutoff_cfg = copy.deepcopy(base_cfg)
+    cutoff_cfg["id"] = f'cut{i:02}'
+    cutoff_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}"]
+    cutoff_cfg["notes"] += [f"Under-Approximation with cut-offs, size threshold 2^{i}"]
+    CONFIGS.append(cutoff_cfg)
+    for j in range(2, 7):
+        clip_cfg = copy.deepcopy(base_cfg)
+        clip_cfg["id"] = f"clip{i:02}res{j:02}"
+        clip_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}", f"--use-clipping", f"--clip-resolution {j}"]
+        clip_cfg["notes"] += [f"Under-Approximation with clipping, size threshold 2^{i}, clipping resolution {j}"]
+        CONFIGS.append(clip_cfg)
 
-    reg_d_cfg = copy.deepcopy(regular_base_cfg)
-    reg_d_cfg["id"] = f'regbelseqd{i:02}'
-    reg_d_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", "--triangulationmode static"]
-    reg_d_cfg["notes"] += [f"Regular sequential approach, with discretization and resolution {i}"]
-    CONFIGS.append(reg_d_cfg)
+cutoff_default_cfg = copy.deepcopy(base_cfg)
+cutoff_default_cfg["id"] = f'cut00'
+cutoff_default_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold 0"]
+cutoff_default_cfg["notes"] += [f"Under-Approximation with cut-offs, heuristic size threshold"]
+CONFIGS.append(cutoff_default_cfg)
 
-    seq_c_cfg = copy.deepcopy(base_cfg) # sequential approach with cutoffs (always reward aware)
-    seq_c_cfg["id"] = f'belseqc{i:02}'
-    seq_c_cfg["cmd"] += ["--reward-aware", "--belief-exploration unfold", f"--size-threshold {2**i}"]
-    seq_c_cfg["notes"] += [f"Sequential approach, cost aware, with cutoffs and size threshold 2^{i}"]
-    CONFIGS.append(seq_c_cfg)
-    unr_c_cfg = copy.deepcopy(base_cfg) # unfolding approach with cutoffs and reward awareness
-    unr_c_cfg["id"] = f'caunfc{i:02}'
-    unr_c_cfg["cmd"] += ["--reward-aware", "--unfold-reward-bound", "--belief-exploration unfold", f"--size-threshold {2**i}"]
-    unr_c_cfg["notes"] += [f"Unfolds cost bounds, cost aware, with cutoffs and size threshold 2^{i}"]
-    CONFIGS.append(unr_c_cfg)
-    uns_c_cfg = copy.deepcopy(base_cfg) # unfolding approach with cutoffs and no reward awareness
-    uns_c_cfg["id"] = f'unfc{i:02}'
-    uns_c_cfg["cmd"] += ["--unfold-reward-bound", "--belief-exploration unfold", f"--size-threshold {2**i}"]
-    uns_c_cfg["notes"] += [f"Unfolds cost bounds, not cost-aware, with cutoffs and size threshold 2^{i}"]
-    CONFIGS.append(uns_c_cfg)
-    unb_c_cfg = copy.deepcopy(base_cfg) # discarding reward bounds, with cutoffs and no reward awareness
-    unb_c_cfg["id"] = f'unbc{i:02}'
-    unb_c_cfg["supported-obj-types"] = ["unr"] # only apply this config for unbounded reachability
-    unb_c_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}"]
-    unb_c_cfg["notes"] += [f"Discards the reward bounds, not cost-aware, with cutoffs and size threshold 2^{i}"]
-    # CONFIGS.append(unb_c_cfg)
-
-for i in sorted(set([i*j for i,j in itertools.product([1,2,3,4,5,6,7],[1,2,3,4,5,6,7])])):
-    seq_d_cfg = copy.deepcopy(base_cfg)
-    seq_d_cfg["id"] = f'belseqd{i:02}'
-    seq_d_cfg["cmd"] += ["--reward-aware", "--belief-exploration discretize", f"--resolution {i}", "--triangulationmode static"]
-    seq_d_cfg["notes"] += [f"Sequential approach, cost aware, with discretization and resolution {i}"]
-    CONFIGS.append(seq_d_cfg)
-    unr_d_cfg = copy.deepcopy(base_cfg)
-    unr_d_cfg["id"] = f'caunfd{i:02}'
-    unr_d_cfg["cmd"] += ["--reward-aware", "--unfold-reward-bound", "--belief-exploration discretize", f"--resolution {i}", "--triangulationmode static"]
-    unr_d_cfg["notes"] += [f"Unfolds cost bounds, cost aware, with discretization and resolution {i}"]
-    CONFIGS.append(unr_d_cfg)
-    uns_d_cfg = copy.deepcopy(base_cfg)
-    uns_d_cfg["id"] = f'unfd{i:02}'
-    uns_d_cfg["cmd"] += ["--unfold-reward-bound", "--belief-exploration discretize", f"--resolution {i}", "--triangulationmode static"]
-    uns_d_cfg["notes"] += [f"Unfolds cost bounds, not cost aware, with discretization and resolution {i}"]
-    CONFIGS.append(uns_d_cfg)
-    unb_d_cfg = copy.deepcopy(base_cfg)
-    unb_d_cfg["id"] = f'unbd{i:02}'
-    unb_d_cfg["supported-obj-types"] = ["unr"] # only apply this config for unbounded reachability
-    unb_d_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", "--triangulationmode static"]
-    unb_d_cfg["notes"] += [f"Discards the reward bounds, not cost-aware, with discretization and resolution {i}"]
-    # CONFIGS.append(unb_d_cfg)
 
 # Check fully observable models (not relevant)
-seq_fully_obs = copy.deepcopy(base_cfg)
-seq_fully_obs["id"] = "mdpseq"
-seq_fully_obs["cmd"] += ["--check-fully-observable", "--reward-aware"]
-seq_fully_obs["notes"] += ["Sequential approach on the underlying (fully observable) observable MDP"]
-CONFIGS.append(seq_fully_obs)
+fully_obs = copy.deepcopy(base_cfg)
+fully_obs["id"] = "mdp"
+fully_obs["cmd"] += ["--check-fully-observable"]
+fully_obs["notes"] += ["Underlying (fully observable) observable MDP"]
+CONFIGS.append(fully_obs)
 
 # unf_fully_obs = copy.deepcopy(base_cfg)
 # unf_fully_obs["id"] = "funf"
@@ -130,24 +79,8 @@ CONFIGS.append(seq_fully_obs)
 # CONFIGS.append(unf_fully_obs)
 
 CONFIGS = sorted(CONFIGS, key=lambda x: x["id"])
-
-CONFIG_GROUPS = OrderedDict()
-CONFIG_GROUPS["regd"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("regd")]
-CONFIG_GROUPS["regbelseq"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("regbelseqc") or cfg["id"].startswith("regbelseqd")]
-CONFIG_GROUPS["belseq"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("belseqc") or cfg["id"].startswith("belseqd")]
-CONFIG_GROUPS["unf"] = [cfg["id"] for cfg in CONFIGS if cfg["id"].startswith("caunfc") or cfg["id"].startswith("unfc") or cfg["id"].startswith("caunfd") or cfg["id"].startswith("unfd")]
-CONFIG_GROUPS["mdp"] = [cfg["id"] for cfg in CONFIGS if cfg["id"] == "mdpseq"]
-
-CONFIG_GROUP_DESCRIPTIONS = OrderedDict()
-CONFIG_GROUP_DESCRIPTIONS["regd"] = ["All regular over-approximations"]
-CONFIG_GROUP_DESCRIPTIONS["regbelseq"] = ["All regular sequential configs"]
-CONFIG_GROUP_DESCRIPTIONS["belseq"] = ["All sequential configs"]
-CONFIG_GROUP_DESCRIPTIONS["unf"] = ["All unfolding configs"]
-CONFIG_GROUP_DESCRIPTIONS["mdp"] = ["All fully observable configs"]
-
 META_CONFIG_TIMELIMITS = [1800]
-BASE_CONFIGS = ["unfc", "unfd", "caunfc", "caunfd", "belseqc", "belseqd"] #, "unbc", "unbd"]
-REG_BASE_CONFIGS = ["regd", "regbelseqc", "regbelseqd"]
+BASE_CONFIGS = ["discr", "cut", "clip"] #, "unbc", "unbd"]
 META_CONFIGS = []
 for timelimit in META_CONFIG_TIMELIMITS:
     for cfgbase in BASE_CONFIGS:
@@ -210,21 +143,12 @@ def parse_logfile(log, inv):
         inv["result"] = "≥1.0"
         inv["total-chk-time"] = "0.0"
 
-    posUnf = log.find("Perform explicit unfolding of reward bounds.", pos)
-    if posUnf >= 0:
-        pos = posUnf
-        inv["unfolding-pomdp"] = OrderedDict()
-        pos = try_parse(log, pos, "States: \t", "\n", inv["unfolding-pomdp"], "states", int)
-        pos = try_parse(log, pos, "Transitions: \t", "\n", inv["unfolding-pomdp"], "transitions", int)
-        pos = try_parse(log, pos, "Choices: \t", "\n", inv["unfolding-pomdp"], "choices", int)
-        pos = try_parse(log, pos, "Observations: \t", "\n", inv["unfolding-pomdp"], "observations", int)
-
     if "Exploration stopped before all beliefs were explored" in log:
         inv["belief-mdp-incomplete"] = True
 
-    posBel = log.find("Constructing the belief MDP...", pos)
-    if posBel>=0:
-        pos=posBel
+    pos_bel = log.find("Constructing the belief MDP...", pos)
+    if pos_bel>=0:
+        pos=pos_bel
         inv["belief-mdp"] = OrderedDict()
         pos = try_parse(log, pos, "States: \t", "\n", inv["belief-mdp"], "states", int)
         pos = try_parse(log, pos, "Transitions: \t", "\n", inv["belief-mdp"], "transitions", int)
@@ -232,10 +156,6 @@ def parse_logfile(log, inv):
         pos = try_parse(log, pos, "Time for exploring beliefs: ", "s.", inv["belief-mdp"], "expl-time", float)
         pos = try_parse(log, pos, "Time for building the belief MDP: ", "s.", inv["belief-mdp"], "build-time", float)
         pos = try_parse(log, pos, "Time for analyzing the belief MDP: ", "s.", inv["belief-mdp"], "chk-time", float)
-
-    # intentionally, this is now only parsed if the belief MDP is *not* constructed.
-    # this is because the belief MDP might be incomplete and thus the reported number of checked epochs might be lower
-    pos = try_parse(log, pos, "#checked epochs: ", ".\n", inv, "num-epochs", int)
 
     pos = try_parse(log, pos, "\nResult: ", "\n", inv, "result", str)
     pos = try_parse(log, pos, "Time for POMDP analysis: ", "s.", inv, "total-chk-time", float)

@@ -6,6 +6,9 @@ from tools import *
 
 OUT_DIR = "data"
 
+def strip_benchmark_set_prefix(inst_id):
+    return inst_id.split("_", 1)[1] if "_" in inst_id else inst_id
+
 def load_json(path : str):
     with open(path, 'r', encoding='utf-8-sig') as json_file:
         return json.load(json_file, object_pairs_hook=OrderedDict)
@@ -768,7 +771,7 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
         column_contents = []
         cfgbases = storm.BASE_CONFIGS + getattr(storm, "REG_BASE_CONFIGS", [])
         for cfgbase, inst_id in itertools.product(cfgbases, benchmark_instances.keys()):
-            header += [f"{cfgbase}.{inst_id.replace('main_','')}.{postfix}" for postfix in ["time", "result"]]
+            header += [f"{cfgbase}.{strip_benchmark_set_prefix(inst_id)}.{postfix}" for postfix in ["time", "result"]]
             column_contents.append(get_time_result_list_for_plot(cfgbase, inst_id))
 
         table = [header]
@@ -785,7 +788,7 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
         save_csv(table, os.path.join(OUT_DIR, f"{prefix}time_result.csv"))
         with open(os.path.join(OUT_DIR, f"{prefix}time_result.tex"), 'w') as f:
             for inst in benchmark_instances.keys():
-                f.write("\\defaulttimeresplot{{{}}}{{0.1}}{{3600}}\n".format( inst.replace("main_", r"")))
+                f.write("\\defaulttimeresplot{{{}}}{{0.1}}{{3600}}\n".format(strip_benchmark_set_prefix(inst).replace("_", r"\_")))
 
 
     def export_data_for_kind(kind):

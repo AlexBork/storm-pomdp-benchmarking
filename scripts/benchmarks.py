@@ -7,33 +7,19 @@ from executing import replace_placeholders_in_cmd_string
 MODELS_DIR = "$BENCH_HOME/models"
 
 PROPERTY_TYPES = OrderedDict()
-PROPERTY_TYPES["unr"] = "Unbounded reachability probability"
-PROPERTY_TYPES["rbr"] = "Reward-bounded reachability probability"
 PROPERTY_TYPES["prb"] = "Reachability probability"
 PROPERTY_TYPES["rew"] = "Expected reward"
-INSTANCES = benchmarkset.create_all_instances()
+INSTANCES = benchmarkset.create_instances()
 NAMES = list(dict.fromkeys([i["name"] for i in INSTANCES]).keys())
 BENCHMARK_SETS = OrderedDict()
-BENCHMARK_SETS["reg-main"] = ["Regular benchmark set"]
-BENCHMARK_SETS["rb-main"] = ["Reward-bounded main benchmark set"]
-BENCHMARK_SETS["rb-unb"] = ["Reward-bounded unbounded reachability"]
-BENCHMARK_SETS["rb-lvls"] = ["Reward-bounded level observation experiments"]
-BENCHMARK_SETS["rb-bnds"] = ["Reward-bounded bound magnitude experiments"]
-for bset in BENCHMARK_SETS:
-    BENCHMARK_SETS[bset].append("{} instances".format(len([i for i in INSTANCES if i["benchmark-set"] == bset])))
-
-BENCHMARK_SET_ROOTS = OrderedDict([[bset, next(i["benchmark-root"] for i in INSTANCES if i["benchmark-set"] == bset)] for bset in BENCHMARK_SETS])
-BENCHMARK_ROOTS = OrderedDict()
-for root in dict.fromkeys([i["benchmark-root"] for i in INSTANCES]):
-    set_count = len([bset for bset, bset_root in BENCHMARK_SET_ROOTS.items() if bset_root == root])
-    instance_count = len([i for i in INSTANCES if i["benchmark-root"] == root])
-    BENCHMARK_ROOTS[root] = [f"{root.replace('-', ' ').title()} benchmarks", f"{set_count} sets", f"{instance_count} instances"]
+for bset in dict.fromkeys([i["benchmark-set"] for i in INSTANCES]):
+    BENCHMARK_SETS[bset] = [f"{bset} benchmark set", "{} instances".format(len([i for i in INSTANCES if i["benchmark-set"] == bset]))]
 
 def get_full_model_filename(inst):
-    return os.path.join(MODELS_DIR, inst["benchmark-root"], inst["model"]["file"])
+    return os.path.join(MODELS_DIR, inst["model"]["file"])
 
 def get_full_property_filename(inst):
-    return os.path.join(MODELS_DIR, inst["benchmark-root"], inst["property"]["file"])
+    return os.path.join(MODELS_DIR, inst["property"]["file"])
 
 def from_id(identifier):
     for b in INSTANCES:

@@ -1,7 +1,0 @@
-// Constants for reward bounds
-const int B1;
-const int B2;
-const int B3;
-
-"rbrmax3": Pmax=? [F{"gold"}>=B1,{"gem"}>=B2,{"steps"}<=B3 x=XINIT & y=YINIT];
-"unrmax": Pmax=? [F x=XINIT & y=YINIT];
