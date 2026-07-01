@@ -97,11 +97,11 @@ rewards "dropped_packets"
 endrewards
 
 // reward structure for number of sent packets
-//rewards "packets_sent"
-//	[send1] chan1=1 : 1;
-//	[send2] chan2=1 : 1;
-//	[send3] chan3=1 : 1;
-//endrewards
+rewards "packets_sent"
+	[send1] chan1=1 : 1;
+	[send2] chan2=1 : 1;
+	[send3] chan3=1 : 1;
+endrewards
 
 // target observation
 label "goal" = sched=0 & t=T-1 & k=K-1;
