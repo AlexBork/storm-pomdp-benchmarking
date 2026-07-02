@@ -31,7 +31,7 @@ CONFIGS = []
 
 base_cfg = OrderedDict()
 base_cfg["tool"] = NAME
-base_cfg["cmd"] = ["--timemem", "--statistics", "--sound"]
+base_cfg["cmd"] = ["--timemem", "--statistics", "--sound", "--lpsolver gurobi", "--gurobi:inttol 1e-9"]
 base_cfg["notes"] = ["Storm-pomdp"]
 base_cfg["supported-obj-types"] = ["prb", "rew"]
 base_cfg["supported-model-types"] = ["pomdp"]
@@ -40,7 +40,14 @@ base_cfg["supported-model-formalisms"] = ["prism"]
 for i in range(2, 13):
     for mode in ["static", "dynamic"]:
         discr_cfg = copy.deepcopy(base_cfg)
-        discr_cfg["id"] = f"discr{i:02}{mode[0]}"
+        discr_cfg["id"] = f"discr{i:03}{mode[0]}"
+        discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
+        discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
+        CONFIGS.append(discr_cfg)
+for i in [15,21,30,210]:
+    for mode in ["static", "dynamic"]:
+        discr_cfg = copy.deepcopy(base_cfg)
+        discr_cfg["id"] = f"discr{i:03}{mode[0]}"
         discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
         discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
         CONFIGS.append(discr_cfg)
@@ -51,6 +58,8 @@ for i in range(8,33):
     cutoff_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}"]
     cutoff_cfg["notes"] += [f"Under-Approximation with cut-offs, size threshold 2^{i}"]
     CONFIGS.append(cutoff_cfg)
+
+for i in [8,16,20]:
     for j in range(2, 7):
         clip_cfg = copy.deepcopy(base_cfg)
         clip_cfg["id"] = f"clip{i:02}res{j:02}"
