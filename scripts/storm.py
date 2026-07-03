@@ -1,4 +1,4 @@
-import os, copy, itertools, json
+import os, copy, itertools, json, re
 from collections import OrderedDict
 
 import benchmarks
@@ -44,13 +44,6 @@ for i in range(2, 13):
         discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
         discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
         CONFIGS.append(discr_cfg)
-for i in [15,21,30,210]:
-    for mode in ["static", "dynamic"]:
-        discr_cfg = copy.deepcopy(base_cfg)
-        discr_cfg["id"] = f"discr{i:03}{mode[0]}"
-        discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
-        discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
-        CONFIGS.append(discr_cfg)
 
 for i in range(8,33):
     cutoff_cfg = copy.deepcopy(base_cfg)
@@ -59,8 +52,8 @@ for i in range(8,33):
     cutoff_cfg["notes"] += [f"Under-Approximation with cut-offs, size threshold 2^{i}"]
     CONFIGS.append(cutoff_cfg)
 
-for i in [8,16,20]:
-    for j in range(2, 7):
+for i in [8,12,16]:
+    for j in range(2, 6):
         clip_cfg = copy.deepcopy(base_cfg)
         clip_cfg["id"] = f"clip{i:02}res{j:02}"
         clip_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}", f"--use-clipping", f"--clip-resolution {j}"]
@@ -72,6 +65,13 @@ cutoff_default_cfg["id"] = f'cut00'
 cutoff_default_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold 0"]
 cutoff_default_cfg["notes"] += [f"Under-Approximation with cut-offs, heuristic size threshold"]
 CONFIGS.append(cutoff_default_cfg)
+
+for j in range(2, 6):
+    clip_default_cfg = copy.deepcopy(base_cfg)
+    clip_default_cfg["id"] = f"clip00res{j:02}"
+    clip_default_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold 0", f"--use-clipping", f"--clip-resolution {j}"]
+    clip_default_cfg["notes"] += [f"Under-Approximation with clipping, heuristic size threshold, clipping resolution {j}"]
+    CONFIGS.append(clip_default_cfg)
 
 
 # Check fully observable models (not relevant)
@@ -120,6 +120,34 @@ def try_parse(log, start, before, after, out_dict, out_key, out_type):
             return pos2 + len(after)
     return start
 
+def try_parse_duration(log, start, before, out_dict, out_key):
+    pos1 = log.find(before, start)
+    if pos1 < 0:
+        return start
+    pos1 += len(before)
+    match = re.match(r"([0-9]+(?:\.[0-9]+)?)(ms|s)\.", log[pos1:])
+    if match is None:
+        return start
+    value = float(match.group(1))
+    if match.group(2) == "ms":
+        value /= 1000.0
+    out_dict[out_key] = value
+    return pos1 + match.end()
+
+def try_parse_constructed_belief_mdp(log, start, out_dict):
+    prefix = "Constructed belief MDP: "
+    pos1 = log.find(prefix, start)
+    if pos1 < 0:
+        return start
+    pos1 += len(prefix)
+    match = re.match(r"([0-9]+) states, ([0-9]+) choices, ([0-9]+) transitions\.", log[pos1:])
+    if match is None:
+        return start
+    out_dict["states"] = int(match.group(1))
+    out_dict["choices"] = int(match.group(2))
+    out_dict["transitions"] = int(match.group(3))
+    return pos1 + match.end()
+
 def parse_logfile(log, inv):
     unsupported_messages = [] # add messages that indicate that the invocation is not supported
     inv["not-supported"] = contains_any_of(log, unsupported_messages)
@@ -133,7 +161,7 @@ def parse_logfile(log, inv):
     if len(inv["return-codes"]) != 1 or inv["return-codes"][0] != 0:
         if not inv["timeout"] and not inv["memout"]: print("WARN: Unexpected return code(s): {} in {}".format(inv["return-codes"], inv["id"]))
 
-    pos = try_parse(log, 0, "Time for model construction: ", "s.", inv, "model-building-time", float)
+    pos = try_parse_duration(log, 0, "Time for model construction: ", inv, "model-building-time")
     if pos == 0: 
         assert inv["timeout"] or inv["memout"], "WARN: unable to get model construction time for {}".format(inv["id"])
         return
@@ -152,22 +180,33 @@ def parse_logfile(log, inv):
         inv["result"] = "≥1.0"
         inv["total-chk-time"] = "0.0"
 
-    if "Exploration stopped before all beliefs were explored" in log:
+    if "Exploration stopped before all beliefs were explored" in log or "Belief exploration stopped early:" in log:
         inv["belief-mdp-incomplete"] = True
 
     pos_bel = log.find("Constructing the belief MDP...", pos)
+    if pos_bel < 0:
+        pos_bel = log.find("Constructed belief MDP: ", pos)
     if pos_bel>=0:
         pos=pos_bel
         inv["belief-mdp"] = OrderedDict()
         pos = try_parse(log, pos, "States: \t", "\n", inv["belief-mdp"], "states", int)
         pos = try_parse(log, pos, "Transitions: \t", "\n", inv["belief-mdp"], "transitions", int)
         pos = try_parse(log, pos, "Choices: \t", "\n", inv["belief-mdp"], "choices", int)
-        pos = try_parse(log, pos, "Time for exploring beliefs: ", "s.", inv["belief-mdp"], "expl-time", float)
-        pos = try_parse(log, pos, "Time for building the belief MDP: ", "s.", inv["belief-mdp"], "build-time", float)
-        pos = try_parse(log, pos, "Time for analyzing the belief MDP: ", "s.", inv["belief-mdp"], "chk-time", float)
+        pos = try_parse_constructed_belief_mdp(log, pos, inv["belief-mdp"])
+        pos = try_parse_duration(log, pos, "Time for exploring beliefs: ", inv["belief-mdp"], "expl-time")
+        pos = try_parse_duration(log, pos, "Time for building the belief MDP: ", inv["belief-mdp"], "build-time")
+        pos = try_parse_duration(log, pos, "Time for analyzing the belief MDP: ", inv["belief-mdp"], "chk-time")
 
-    pos = try_parse(log, pos, "\nResult: ", "\n", inv, "result", str)
-    pos = try_parse(log, pos, "Time for POMDP analysis: ", "s.", inv, "total-chk-time", float)
+    pos_result = try_parse(log, pos, "\nResult: ", "\n", inv, "result", str)
+    if pos_result == pos:
+        pos_result = try_parse(log, pos, "\nResult till abort: ", "\n", inv, "result", str)
+    pos = pos_result
+    pos = try_parse_duration(log, pos, "Time for POMDP analysis: ", inv, "total-chk-time")
+
+    if "total-chk-time" not in inv and "belief-mdp" in inv:
+        belief_times = ["expl-time", "build-time", "chk-time"]
+        if all(t in inv["belief-mdp"] for t in belief_times):
+            inv["total-chk-time"] = sum(inv["belief-mdp"][t] for t in belief_times)
 
     assert inv["memout"] or inv["timeout"] or ("result" in inv and "total-chk-time" in inv), "Unable to find result or total-chk-time in {}".format(inv["id"]);
 

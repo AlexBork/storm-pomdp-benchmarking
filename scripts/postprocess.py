@@ -378,10 +378,6 @@ def process_benchmark_instance_data(benchmark_instances, execution_json):
     bench_data["name"] = execution_json["benchmark"]["name"]
     bench_data["formalism"] = execution_json["benchmark"]["model"]["formalism"]
     bench_data["type"] = execution_json["benchmark"]["model"]["type"]
-    if "lvl-width" in execution_json["benchmark"]["model"]:
-        bench_data["lvl-width"] = execution_json["benchmark"]["model"]["lvl-width"]
-    if "bnd-thresholds" in execution_json["benchmark"]["model"]:
-        bench_data["bnd-thresholds"] = execution_json["benchmark"]["model"]["bnd-thresholds"]
     bench_data["par"] = "_".join(bench_id.split("_")[3:])
     bench_data["property"] = execution_json["benchmark"]["property"]["type"]
     bench_data["dim"] = execution_json["benchmark"]["property"].get("num-bnd-rew-assignments", 0)
@@ -391,13 +387,6 @@ def process_benchmark_instance_data(benchmark_instances, execution_json):
     if execution_json["benchmark"]["model"]["type"] == "pomdp":
         bench_data["observations"] = execution_json["input-model"]["observations"]
     bench_data["transitions"] = execution_json["input-model"]["transitions"]
-    if "num-epochs" in execution_json and "result" in execution_json:
-        bench_data["num-epochs"] = execution_json["num-epochs"]
-    if "unfolding-pomdp" in execution_json and "states" in execution_json["unfolding-pomdp"]:
-        if "--reward-aware" in " ".join(execution_json["commands"]):
-            bench_data["caunf-states"] = execution_json["unfolding-pomdp"]["states"]
-        else:
-            bench_data["unf-states"] = execution_json["unfolding-pomdp"]["states"]
     bench_data["invocations"] = [execution_json["id"]]
 
     # incorporate into existing data
@@ -405,7 +394,7 @@ def process_benchmark_instance_data(benchmark_instances, execution_json):
         benchmark_instances[bench_id] = bench_data
     else:
         # ensure consistency
-        for key in ["id", "name", "formalism", "type", "par", "property", "dim", "states", "choices", "observations", "transitions", "num-epochs", "unf-states", "caunf-states"]:
+        for key in ["id", "name", "formalism", "type", "par", "property", "dim", "states", "choices", "observations", "transitions"]:
             if key in bench_data:
                 if key in benchmark_instances[bench_id]:
                     if benchmark_instances[bench_id][key] != bench_data[key]:
@@ -801,7 +790,7 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
                 cols += [[c[0], c[1], "wallclock-time"] for c in cfgs]
                 latex_cols = [r"\multicolumn{1}{c}{Model}", r"\multicolumn{1}{c}{$|\epochs|$}", r"\multicolumn{1}{c}{$|S_\mathsf{un}|$}", r"\multicolumn{2}{c}{\config{unfold}: \config{cut} / \config{discr}}", r"\multicolumn{2}{c}{\config{ca-unfold}: \config{cut} / \config{discr}}", r"\multicolumn{2}{c}{\config{ca-bel-seq}: \config{cut} / \config{discr}}"]
                 latex_col_aligns = "c@{}" + "r" * (len(cols)-1)
-                cells = create_cells(cols, cfgs, kind, [5,6,7,8])
+                cells = create_cells(cols, cfgs, kind, None)
                 # cells = merge_cells_latex(cells, [[5,6],[7,8],[9,10]])
             else:
                 cols = [["name"], ["states"], ["choices"], ["observations"], ["dim"], ["num-epochs"]]
@@ -812,7 +801,7 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
             latex_header = "\n& ".join(latex_cols)
             save_latex(cells, latex_col_aligns, latex_header, os.path.join(OUT_DIR, "{}table{}.tex".format(prefix, kind[len("latex"):])))
         else:
-            cols = [["name"], ["par"], ["states"], ["choices"], ["observations"], ["property"], ["dim"], ["num-epochs"], ["unf-states"], ["caunf-states"]]
+            cols = [["name"], ["par"], ["states"], ["choices"], ["observations"], ["property"]]
             cfgs = [ [tool.NAME, c["id"]] for tool in TOOLS  for c in tool.CONFIGS + tool.META_CONFIGS ]
             cols += [[c[0], c[1], "wallclock-time"] for c in cfgs]
             # create and export different kinds of data
@@ -828,69 +817,6 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
     if len(benchmark_instances) == 0: return
     for kind in export_kinds: export_data_for_kind(kind)
     create_time_result_csv()
-
-
-def get_lvlbnd_result_list_for_plot(cfg_id, instances, kind):
-    min_kind_value = 0
-    max_kind_value = 300 if kind == "lvls" else 300 # TODO
-    datalist = []
-    is_increasing = False
-    is_decreasing = False
-    for inst_id in instances:
-        res = get_result_if_supported(exec_data, storm.NAME, cfg_id, inst_id)
-        if res is not None and "result" in res:
-            assert res["result"][:2] in ["≤ ", "≥ "], f"Unexpected result string: {res['result']}"
-            is_increasing = is_increasing or res["result"][:2] == "≥ " # lower bounds should be increasing over time
-            is_decreasing = is_decreasing or res["result"][:2] == "≤ " # upper bounds should be decreasing over time
-            assert not is_increasing or not is_decreasing, f"Unexpected result string: {res['result']}"
-            if kind == "lvls":
-                kind_value = benchmark_instances[inst_id]["bnd-thresholds"][0] / benchmark_instances[inst_id]["lvl-width"][0] # TODO: only looks at first value, discard other lvl widths
-            else:
-                kind_value = benchmark_instances[inst_id]["bnd-thresholds"][0]
-            datalist.append((kind_value, float(res["result"][2:])))
-    datalist = sorted(datalist)
-    if len(datalist) == 0: return []
-    result = [(min_kind_value, 0.0 if is_increasing else 1.0)]
-    for t,r in datalist:
-        prev_r = result[-1][1]
-        # discard bounds that are worse than what is already known TODO: check if this is necessary
-        # if is_increasing and prev_r > r: continue
-        # if is_decreasing and prev_r < r: continue
-        result.append((t,prev_r)) # results in a 'stair' form for the plot TODO: check if this is what we want
-        result.append((t,r))
-    result.append((max_kind_value, result[-1][1]))
-    result = result[1:]
-    return result
-
-
-def create_lvlbnd_result_csv(exec_data, instances, kind, prefix=""):
-    if len(instances) == 0: return
-    assert kind in ["lvls", "bnds"]
-    instance_names =  set([b["name"] for b in instances.values()])
-    header = []
-    column_contents = []
-    for cfg, inst_name in itertools.product(storm.META_CONFIGS, instance_names):
-        header += [f"{cfg['id']}.{inst_name}.{postfix}" for postfix in [kind, "result"]]
-        instance_subset = {b_id: b_data for b_id, b_data in instances.items() if b_data["name"] == inst_name}
-        column_contents.append(get_lvlbnd_result_list_for_plot(cfg["id"], instance_subset,  kind))
-
-    table = [header]
-    num_rows = max([len(c) for c in column_contents])
-    for row_index in range(num_rows):
-        row = []
-        for col in column_contents:
-            if row_index < len(col):
-                row += [col[row_index][0], col[row_index][1]]
-            else:
-                row += ["", ""]
-        table.append(row)
-
-    save_csv(table, os.path.join(OUT_DIR, f"{prefix}{kind}_result.csv"))
-    with open(os.path.join(OUT_DIR, f"{prefix}{kind}_result.tex"), 'w') as f:
-        for inst in instance_names:
-            f.write(r"\begin{figure}[t]" + "\\default{}resplot{{{}}}{{0.1}}{{3600}}\\caption{{{}}}".format(kind,inst, inst.replace("_", r"\_")) + r"\end{figure}" + "\n")
-
-
 
 if __name__ == "__main__":
     print("Benchmarking tool.")
@@ -923,10 +849,4 @@ if __name__ == "__main__":
 
 
     export_kinds = ["default", "scatter", "quantile", "html", "latexbenchmarks"] + [f"latext{t}" for t in storm.META_CONFIG_TIMELIMITS]
-    export_data(exec_data, get_benchmark_subset(["reg-main"]), export_kinds, prefix="reg-")
-    export_data(exec_data, get_benchmark_subset(["rb-main"]), export_kinds, prefix="rb-")
-    export_data(exec_data, get_benchmark_subset(["rb-lvls"]), ["html"], prefix="rb-lvls-")
-    export_data(exec_data, get_benchmark_subset(["rb-bnds"]), ["html"], prefix="rb-bnds-")
-    # export_data(exec_data, get_benchmark_subset(["rb-unb"]), export_kinds)
-    create_lvlbnd_result_csv(exec_data,  get_benchmark_subset(["rb-lvls"]), "lvls", prefix="rb-")
-    create_lvlbnd_result_csv(exec_data,  get_benchmark_subset(["rb-bnds"]), "bnds", prefix="rb-")
+    export_data(exec_data, get_benchmark_subset(["drone"]), export_kinds, prefix="drone-")
