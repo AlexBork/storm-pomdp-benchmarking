@@ -1,4 +1,4 @@
-"rewmin": Rmin=? [ F "goal" ]
+"rewmin": Rmin=? [ F "goal" ];
 
 // max probability reach goal (use with step bound property)
-"prbmax": Pmax=? [ F "goal" ]
+"prbmax": Pmax=? [ F "goal" ];
