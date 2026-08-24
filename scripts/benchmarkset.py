@@ -85,7 +85,7 @@ def create_instances():
     instances = []
 
     open_parameters = ["sl"]
-    par_val_list = [[0.1], [0.3]]
+    par_val_list = [[0], [0.1], [0.3]]
     instances += create_model_instances("grid", "grid", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="grid/4x4grid-sl.prism", property_filename="grid/grid.props")
     instances += create_model_instances("grid", "grid", "prbmax", open_parameter_names=open_parameters, par_values_list=[[0]], model_filename="grid/4x4grid-sl.prism", property_filename="grid/grid.props")
 
@@ -99,7 +99,7 @@ def create_instances():
     instances += create_model_instances("samplerocks", "samplerocks", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="samplerocks/samplerocks.prism", property_filename="samplerocks/samplerocks.props")
 
     open_parameters = ["N", "R"]
-    par_val_list = [[4, 1], [4, 2], [5, 1], [5, 3]]
+    par_val_list = [[4, 1], [4, 2], [5, 1], [5, 3], [8, 2]]
     instances += create_model_instances("drone", "drone", "prbmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="drone/drone.prism", property_filename="drone/drone.props")
 
     instances += create_model_instances("lanes-100", "lanes-100", "rewmin", model_filename="lanes-100/lanes-100.prism", property_filename="lanes-100/lanes100.props")
@@ -128,11 +128,14 @@ def create_instances():
     instances += create_model_instances("maze-concise", "maze-concise", "rewmin", model_filename="maze-concise/maze-concise.prism", property_filename="maze-concise/maze-concise.props")
 
     open_parameters = ["sl"]
-    par_val_list = [[0.1], [0.3]]
+    par_val_list = [[0], [0.1], [0.3]]
     instances += create_model_instances("maze2", "maze2", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="maze2/maze2-sl.prism", property_filename="maze2/maze2.props")
 
     instances += create_model_instances("crypt", "crypt", "prbmin", model_filename="crypt/crypt_small.prism", property_filename="crypt/crypt.props")
     instances += create_model_instances("crypt", "crypt", "prbmax", model_filename="crypt/crypt_small.prism", property_filename="crypt/crypt.props")
+    for size in [4, 6]:
+        for property_id in ["prbmin", "prbmax"]:
+            instances += create_model_instances(f"crypt{size}", "crypt", property_id, model_filename=f"crypt/crypt{size}.prism", property_filename="crypt/crypt.props")
 
     open_parameters = ["N"]
     par_val_list = [[3], [4], [5], [6]]
@@ -143,7 +146,7 @@ def create_instances():
     instances += create_model_instances("nrp", "nrp", "prbmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="nrp/nrp.prism", property_filename="nrp/nrp.props")
 
     open_parameters = ["N"]
-    par_val_list = [[6], [8], [10]]
+    par_val_list = [[6], [8], [10], [20]]
     instances += create_model_instances("refuel", "refuel", "prbmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="refuel/refuel.prism", property_filename="refuel/refuel.props")
 
     return instances

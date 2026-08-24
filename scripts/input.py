@@ -24,6 +24,8 @@ def input_selection(item : str, options, single_choice = False):
         if "d" in options: raise AssertionError("options should not include key 'd'")
         if "c" in options: raise AssertionError("options should not include key 'c'")
     if len(options) == 0: raise AssertionError("options should not be empty.")
+    option_keys = list(options)
+    number_width = len(str(len(option_keys)))
     longest_option_descriptions = []
     longest_option_descriptions.append(max([len(key) for key in options] + [4]) + 4)
     i = 0
@@ -42,14 +44,14 @@ def input_selection(item : str, options, single_choice = False):
     while True:
         keys = []
         print("Select {}.".format(item))
-        print("    Option" + " " * (longest_option_descriptions[0] - len("Option")) + "Description")
-        print("----" + "-" * sum(longest_option_descriptions))
-        for key in options:
+        print("    No.  Option" + " " * (longest_option_descriptions[0] - len("Option")) + "Description")
+        print("----" + "-" * (sum(longest_option_descriptions) + number_width + 4))
+        for number, key in enumerate(option_keys, start=1):
             keys.append(key)
             description = ""
             for i in range(len(options[key])):
                 description += "{}{}".format(options[key][i], " " * (longest_option_descriptions[i+1] - len(options[key][i])))
-            print("{}{}{}".format("[X] " if key in selected_keys else "[ ] ", key + " " * (longest_option_descriptions[0] - len(key)), description))
+            print("{}{:>{}}  {}{}".format("[X] " if key in selected_keys else "[ ] ", number, number_width, key + " " * (longest_option_descriptions[0] - len(key)), description))
         if not single_choice:
             keys.append("a")
             print("    {}Select all".format("a" + " " * (longest_option_descriptions[0] - 1)))
@@ -58,7 +60,9 @@ def input_selection(item : str, options, single_choice = False):
             print("    {}Clear selection".format("c" + " " * (longest_option_descriptions[0] - 1)))
             keys.append("d")
             print("    {}done".format("d" + " " * (longest_option_descriptions[0] - 1)))
-        selection = input("Enter option: ")
+        selection = input("Enter option number or id: ")
+        if selection.isdigit() and 1 <= int(selection) <= len(option_keys):
+            selection = option_keys[int(selection) - 1]
         if selection in keys:            
             if selection in options:
                 selected_keys.append(selection)

@@ -41,6 +41,7 @@ for i in range(2, 13):
     for mode in ["static", "dynamic"]:
         discr_cfg = copy.deepcopy(base_cfg)
         discr_cfg["id"] = f"discr{i:03}{mode[0]}"
+        discr_cfg["family"] = "discretisation"
         discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
         discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
         CONFIGS.append(discr_cfg)
@@ -48,6 +49,7 @@ for i in range(2, 13):
 for i in range(8,33):
     cutoff_cfg = copy.deepcopy(base_cfg)
     cutoff_cfg["id"] = f'cut{i:02}'
+    cutoff_cfg["family"] = "cutoff"
     cutoff_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}"]
     cutoff_cfg["notes"] += [f"Under-Approximation with cut-offs, size threshold 2^{i}"]
     CONFIGS.append(cutoff_cfg)
@@ -56,12 +58,14 @@ for i in [8,12,16]:
     for j in range(2, 6):
         clip_cfg = copy.deepcopy(base_cfg)
         clip_cfg["id"] = f"clip{i:02}res{j:02}"
+        clip_cfg["family"] = "clipping"
         clip_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}", f"--use-clipping", f"--clip-resolution {j}"]
         clip_cfg["notes"] += [f"Under-Approximation with clipping, size threshold 2^{i}, clipping resolution {j}"]
         CONFIGS.append(clip_cfg)
 
 cutoff_default_cfg = copy.deepcopy(base_cfg)
 cutoff_default_cfg["id"] = f'cut00'
+cutoff_default_cfg["family"] = "cutoff"
 cutoff_default_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold 0"]
 cutoff_default_cfg["notes"] += [f"Under-Approximation with cut-offs, heuristic size threshold"]
 CONFIGS.append(cutoff_default_cfg)
@@ -69,6 +73,7 @@ CONFIGS.append(cutoff_default_cfg)
 for j in range(2, 6):
     clip_default_cfg = copy.deepcopy(base_cfg)
     clip_default_cfg["id"] = f"clip00res{j:02}"
+    clip_default_cfg["family"] = "clipping"
     clip_default_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold 0", f"--use-clipping", f"--clip-resolution {j}"]
     clip_default_cfg["notes"] += [f"Under-Approximation with clipping, heuristic size threshold, clipping resolution {j}"]
     CONFIGS.append(clip_default_cfg)
@@ -77,6 +82,7 @@ for j in range(2, 6):
 # Check fully observable models (not relevant)
 fully_obs = copy.deepcopy(base_cfg)
 fully_obs["id"] = "mdp"
+fully_obs["family"] = "MDP"
 fully_obs["cmd"] += ["--check-fully-observable"]
 fully_obs["notes"] += ["Underlying (fully observable) observable MDP"]
 CONFIGS.append(fully_obs)

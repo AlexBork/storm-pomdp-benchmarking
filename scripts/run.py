@@ -50,10 +50,3 @@ if __name__ == "__main__":
                 print("\nERROR while processing invocation #{}: {}".format(i, invocation['id']))
                 traceback.print_exc()
             print(f"done ({execution.wall_time:.2f}s).")
-
-    
-    
-    
-
-    
-    

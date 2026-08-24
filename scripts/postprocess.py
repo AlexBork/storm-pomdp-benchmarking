@@ -469,6 +469,9 @@ def process_meta_configs(exec_data, benchmark_instances):
                         best_cfg_id = cfg_id
                         continue
                     best_result_str = exec_data[tool][best_cfg_id][benchmark]["result"]
+                    if result_str[0] not in ["≥", "≤"]:
+                        print("Exact result")
+                        continue
                     assert result_str[0] in ["≥", "≤"], f"Unexpected result string: {result_str}"
                     assert result_str[0] == best_result_str[0], f"inconsistent result strings: {result_str} vs. {best_result_str}"
                     result_value = float(result_str[1:])
@@ -816,7 +819,7 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
     # invoke generation for all kinds
     if len(benchmark_instances) == 0: return
     for kind in export_kinds: export_data_for_kind(kind)
-    create_time_result_csv()
+#    create_time_result_csv()
 
 if __name__ == "__main__":
     print("Benchmarking tool.")
@@ -850,3 +853,6 @@ if __name__ == "__main__":
 
     export_kinds = ["default", "scatter", "quantile", "html", "latexbenchmarks"] + [f"latext{t}" for t in storm.META_CONFIG_TIMELIMITS]
     export_data(exec_data, get_benchmark_subset(["drone"]), export_kinds, prefix="drone-")
+    export_data(exec_data, get_benchmark_subset(["network2"]), export_kinds, prefix="netw2-")
+    export_data(exec_data, get_benchmark_subset(["network-priorities2"]), export_kinds, prefix="netwp2-")
+
