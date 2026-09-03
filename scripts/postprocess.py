@@ -332,22 +332,70 @@ def save_html(table_data, num_tool_configs, path):
 
 
 
-def save_latex(table_data, cols, header, path):
+def save_latex(table_data, cols, header, path, grid=False):
     with open(path, 'w') as latex_file:
         latex_file.write(r"""
 \renewcommand{\tabcolsep}{4.5pt}
 \begin{tabular}{@{}""")
         latex_file.write(cols)
-        latex_file.write(r"""@{}}
-
-\toprule
-""")
-        latex_file.write(header + "\\\\ \\midrule\n")
+        latex_file.write("@{}}\n\n")
+        latex_file.write("\\hline\n" if grid else "\\toprule\n")
+        latex_file.write(header + ("\\\\ \\hline\n" if grid else "\\\\ \\midrule\n"))
         for row in table_data[1:]:
-            latex_file.write("\t&\t".join(row) + "\\\\\n")
-        latex_file.write(r""" \bottomrule
-\end{tabular}
-""")
+            latex_file.write("\t&\t".join(row) + ("\\\\ \\hline\n" if grid else "\\\\\n"))
+        if not grid:
+            latex_file.write(" \\bottomrule\n")
+        latex_file.write("\\end{tabular}\n")
+
+def parse_result_value(result):
+    """Return (relation, value), where relation is '=', '≤', or '≥'."""
+    number_pattern = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+    scalar_match = re.fullmatch(
+        rf"\s*([≤≥])?\s*({number_pattern})\s*",
+        str(result),
+    )
+    if scalar_match is not None:
+        return scalar_match.group(1) or "=", float(scalar_match.group(2))
+
+    interval_match = re.fullmatch(
+        rf"\s*\[\s*({number_pattern})\s*,\s*({number_pattern})\s*\]"
+        rf"(?:\s*\(width\s*=\s*({number_pattern})\))?\s*",
+        str(result),
+    )
+    if interval_match is not None:
+        lower = float(interval_match.group(1))
+        upper = float(interval_match.group(2))
+        if math.isclose(lower, upper, rel_tol=1e-12, abs_tol=1e-15):
+            return "=", (lower + upper) / 2
+        raise ValueError(f"Non-degenerate interval result is not supported: {result}")
+
+    raise ValueError(f"Unexpected result string: {result}")
+
+def is_successful_result(data, maxtime=None):
+    if data is None or "result" not in data:
+        return False
+    if any(data.get(key, False) for key in ["timeout", "memout", "execution-error", "expected-error", "not-supported"]):
+        return False
+    return maxtime is None or data["wallclock-time"] <= maxtime
+
+def expected_bound_relation(cfgbase, benchmark):
+    direction = benchmark["property"]["dir"]
+    if cfgbase in ["cut", "clip"]: # under-approximation
+        return "≥" if direction == "max" else "≤"
+    if cfgbase == "discr": # over-approximation
+        return "≤" if direction == "max" else "≥"
+    return None
+
+def result_selection_score(data, expected_relation):
+    relation, result = parse_result_value(data["result"])
+    if relation == "=":
+        # Every exact result is preferable to a bound. Exact results for one
+        # benchmark are expected to agree, so use runtime as the tie-breaker.
+        return (1, 0, -data["wallclock-time"])
+    if expected_relation is not None and relation != expected_relation:
+        raise ValueError(f"Expected a '{expected_relation}' bound, got '{data['result']}'")
+    quality = result if relation == "≥" else -result
+    return (0, quality, -data["wallclock-time"])
 
 def parse_tool_output(execution_json):
     with open(execution_json["log"], 'r') as logfile:
@@ -380,6 +428,8 @@ def process_benchmark_instance_data(benchmark_instances, execution_json):
     bench_data["type"] = execution_json["benchmark"]["model"]["type"]
     bench_data["par"] = "_".join(bench_id.split("_")[3:])
     bench_data["property"] = execution_json["benchmark"]["property"]["type"]
+    bench_data["property-dir"] = execution_json["benchmark"]["property"]["dir"]
+    bench_data["property-id"] = execution_json["benchmark"]["property"]["id"]
     bench_data["dim"] = execution_json["benchmark"]["property"].get("num-bnd-rew-assignments", 0)
     bench_data["states"] = execution_json["input-model"]["states"]
     if execution_json["benchmark"]["model"]["type"] != "dtmc":
@@ -394,7 +444,7 @@ def process_benchmark_instance_data(benchmark_instances, execution_json):
         benchmark_instances[bench_id] = bench_data
     else:
         # ensure consistency
-        for key in ["id", "name", "formalism", "type", "par", "property", "dim", "states", "choices", "observations", "transitions"]:
+        for key in ["id", "name", "formalism", "type", "par", "property", "property-dir", "property-id", "dim", "states", "choices", "observations", "transitions"]:
             if key in bench_data:
                 if key in benchmark_instances[bench_id]:
                     if benchmark_instances[bench_id][key] != bench_data[key]:
@@ -457,31 +507,25 @@ def process_meta_configs(exec_data, benchmark_instances):
             benchmark_data = OrderedDict()
             for benchmark in benchmark_instances:
                 best_cfg_id = None
+                expected_relation = expected_bound_relation(metacfg["cfgbase"], benchmarks.from_id(benchmark))
                 for cfg_id in exec_data[tool]:
                     if cfg_id in [c["id"] for c in TOOL_NAMES[tool].META_CONFIGS]: continue
                     if not cfg_id.startswith(metacfg["cfgbase"]): continue
                     if benchmark not in  exec_data[tool][cfg_id]: continue
                     data = exec_data[tool][cfg_id][benchmark]
-                    if "maxtime" in metacfg and data["wallclock-time"] > metacfg["maxtime"]: continue
-                    if not "result" in data: continue
-                    result_str = data["result"]
+                    if not is_successful_result(data, metacfg.get("maxtime")): continue
                     if best_cfg_id is None:
-                        best_cfg_id = cfg_id
-                        continue
-                    best_result_str = exec_data[tool][best_cfg_id][benchmark]["result"]
-                    if result_str[0] not in ["≥", "≤"]:
-                        print("Exact result")
-                        continue
-                    assert result_str[0] in ["≥", "≤"], f"Unexpected result string: {result_str}"
-                    assert result_str[0] == best_result_str[0], f"inconsistent result strings: {result_str} vs. {best_result_str}"
-                    result_value = float(result_str[1:])
-                    best_result_value = float(best_result_str[1:])
-                    if result_value == best_result_value:
-                        if data["wallclock-time"] < exec_data[tool][best_cfg_id][benchmark]["wallclock-time"]:
+                        try:
+                            result_selection_score(data, expected_relation)
                             best_cfg_id = cfg_id
-                            continue
-                    if result_str[0] == "≥" and result_value > best_result_value: best_cfg_id = cfg_id
-                    elif result_str[0] == "≤" and result_value < best_result_value: best_cfg_id = cfg_id
+                        except ValueError as e:
+                            print(f"WARN: {e} in {data['id']}")
+                        continue
+                    try:
+                        if result_selection_score(data, expected_relation) > result_selection_score(exec_data[tool][best_cfg_id][benchmark], expected_relation):
+                            best_cfg_id = cfg_id
+                    except ValueError as e:
+                        print(f"WARN: {e} in {data['id']}")
                 if best_cfg_id is not None: benchmark_data[benchmark] = copy.deepcopy(exec_data[tool][best_cfg_id][benchmark])
             exec_data[tool][metacfg["id"]] = benchmark_data
 
@@ -493,6 +537,515 @@ def get_result_if_supported(exec_data, tool, config, inst_id):
         res = get_result(exec_data, tool, config, inst_id)
         if res is not None and not res["not-supported"]:
             return res
+
+def latex_number(value):
+    value = float(value)
+    formatted = f"{value:.3g}"
+    match = re.fullmatch(r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))[eE]([+-]?\d+)", formatted)
+    if match is not None:
+        return r"{}{{\cdot}}10^{{{}}}".format(match.group(1), int(match.group(2)))
+    return formatted
+
+def latex_result(result, bold=False):
+    relation, value = parse_result_value(result)
+    relation_latex = {"=": "", "≤": r"\le ", "≥": r"\ge "}[relation]
+    value_latex = latex_number(value)
+    if bold:
+        value_latex = rf"\mathbf{{{value_latex}}}"
+    return f"${relation_latex}{value_latex}$"
+
+def latex_time(value):
+    if value < 1.0:
+        return r"\textless 1"
+    if value < 100:
+        return f"{value:.1f}"
+    return f"{value:.0f}"
+
+def latex_configuration_parameter(cfgbase, cfg_id):
+    if cfgbase == "cut":
+        match = re.fullmatch(r"cut(\d{2})", cfg_id)
+        if match is not None:
+            threshold = r"\mathrm{heur.}" if match.group(1) == "00" else f"2^{{{int(match.group(1))}}}"
+            return f"$c={threshold}$"
+    elif cfgbase == "clip":
+        match = re.fullmatch(r"clip(\d{2})res(\d{2})", cfg_id)
+        if match is not None:
+            threshold = r"\mathrm{heur.}" if match.group(1) == "00" else f"2^{{{int(match.group(1))}}}"
+            return fr"$c={threshold},\resolution={int(match.group(2))}$"
+    elif cfgbase == "discr":
+        match = re.fullmatch(r"discr(\d{3})([sd])", cfg_id)
+        if match is not None:
+            mode = r"\mathrm{static}" if match.group(2) == "s" else r"\mathrm{dyn.}"
+            return fr"$\resolution={int(match.group(1))},\ {mode}$"
+    return cfg_id.replace("_", r"\_")
+
+def unavailable_result_cell(exec_data, config_ids, inst_id):
+    runs = [get_result(exec_data, storm.NAME, cfg_id, inst_id) for cfg_id in config_ids]
+    runs = [run for run in runs if run is not None]
+    if len(runs) == 0:
+        return "--"
+
+    resource_limit_statuses = []
+    if any(run.get("timeout", False) for run in runs):
+        resource_limit_statuses.append("TO")
+    if any(run.get("memout", False) for run in runs):
+        resource_limit_statuses.append("MO")
+    if len(resource_limit_statuses) > 0:
+        return " / ".join(resource_limit_statuses)
+
+    statuses = []
+    if any(run.get("execution-error", False) or run.get("expected-error", False) or
+           (not run.get("timeout", False) and not run.get("memout", False) and "result" not in run)
+           for run in runs):
+        statuses.append("ERR")
+    return " / ".join(statuses) if len(statuses) > 0 else "ERR"
+
+def is_resource_limit_status(status):
+    return len(status.split(" / ")) > 0 and all(
+        item in ["TO", "MO"] for item in status.split(" / ")
+    )
+
+def resource_limit_cell(status):
+    return r"\shortstack[c]{{{}}}".format(status)
+
+def dissertation_cell(result, runtime=None, parameter=None, highlight=False):
+    if runtime is None and parameter is None and is_resource_limit_status(result):
+        return resource_limit_cell(result)
+    runtime_line = "--" if runtime is None else f"{latex_time(runtime)}s"
+    parameter_line = "--" if parameter is None else parameter
+    cell = r"\shortstack[r]{{{}\\{}\\{}}}".format(result, runtime_line, parameter_line)
+    return (r"\cellcolor{RWTHblue25}" if highlight else "") + cell
+
+def dissertation_result_cell(exec_data, inst_id, cfgbase, timelimit, highlight=False):
+    metacfg_id = f"{cfgbase}-best-in-{timelimit}s"
+    result = get_result(exec_data, storm.NAME, metacfg_id, inst_id)
+    if result is None:
+        config_ids = [cfg["id"] for cfg in storm.CONFIGS if cfg["id"].startswith(cfgbase)]
+        return dissertation_cell(unavailable_result_cell(exec_data, config_ids, inst_id))
+    parameter = latex_configuration_parameter(cfgbase, result["configuration-id"])
+    return dissertation_cell(
+        latex_result(result["result"], highlight),
+        result["wallclock-time"],
+        parameter,
+        highlight,
+    )
+
+def dissertation_property(instance):
+    property_symbol = "P" if instance["property"] == "prb" else "R"
+    base_id = instance["property"] + instance["property-dir"]
+    qualifier = instance["property-id"][len(base_id):]
+    qualifier_latex = "" if qualifier == "" else rf"^{{\mathrm{{{qualifier}}}}}"
+    return rf"${property_symbol}_\mathrm{{{instance['property-dir']}}}{qualifier_latex}$"
+
+def dissertation_parameters(instance):
+    crypt_sizes = {"crypt": "2", "crypt4": "4", "crypt6": "6"}
+    if instance["benchmark-set"] in crypt_sizes:
+        return crypt_sizes[instance["benchmark-set"]]
+    return instance["par"].replace("_", r"\_")
+
+def dissertation_model(instance, finite_belief_mdp=False):
+    model = f"\\model{{{instance['name']}}}"
+    if finite_belief_mdp:
+        model += "$^*$"
+    parameters = dissertation_parameters(instance)
+    return model if parameters == "" else rf"\shortstack{{{model}\\{parameters}}}"
+
+def dissertation_model_identity(benchmark):
+    model = benchmark["model"]
+    return (
+        model["file"],
+        tuple(model.get("file-parameters", {}).items()),
+        tuple(model.get("open-parameters", {}).items()),
+    )
+
+def finite_belief_mdp_models(exec_data, benchmark_instances):
+    finite_models = set()
+    cutoff_ids = [cfg["id"] for cfg in storm.CONFIGS if cfg["id"].startswith("cut")]
+    for benchmark in benchmarks.INSTANCES:
+        inst_id = benchmark["id"]
+        if inst_id not in benchmark_instances:
+            continue
+        for config_id in cutoff_ids:
+            result = get_result(exec_data, storm.NAME, config_id, inst_id)
+            if (is_successful_result(result) and
+                    "belief-mdp" in result and
+                    "states" in result["belief-mdp"] and
+                    not result.get("belief-mdp-incomplete", False) and
+                    parse_result_value(result["result"])[0] == "="):
+                finite_models.add(dissertation_model_identity(benchmark))
+                break
+    return finite_models
+
+def save_dissertation_tables(exec_data, benchmark_instances, timelimit=1800):
+    benchmark_headers = [
+        "Model",
+        r"$|S|$",
+        r"$|Act|$",
+        r"$|Z|$",
+    ]
+    result_headers = [
+        "Model",
+        "Property",
+        r"Cut-Off ($c$)",
+        r"Clipping ($c,\resolution$)",
+        r"Discretisation ($\resolution$)",
+        "MDP",
+    ]
+
+    benchmark_rows = [[]]
+    seen_models = set()
+    finite_models = finite_belief_mdp_models(exec_data, benchmark_instances)
+    for benchmark in benchmarks.INSTANCES:
+        if benchmark["id"] not in benchmark_instances:
+            continue
+        model_identity = dissertation_model_identity(benchmark)
+        if model_identity in seen_models:
+            continue
+        seen_models.add(model_identity)
+        instance = benchmark_instances[benchmark["id"]]
+        benchmark_rows.append([
+            dissertation_model(instance, model_identity in finite_models),
+            str(instance["states"]),
+            str(instance["choices"]),
+            str(instance["observations"]),
+        ])
+    save_latex(benchmark_rows, "|c|r|r|r|", "\n& ".join(benchmark_headers), os.path.join(OUT_DIR, "tablebenchmarks.tex"), grid=True)
+
+    objective_tables = [
+        ("prb", "min", "tableprbmin.tex"),
+        ("prb", "max", "tableprbmax.tex"),
+        ("rew", "min", "tablerewmin.tex"),
+        ("rew", "max", "tablerewmax.tex"),
+    ]
+
+    for property_type, direction, filename in objective_tables:
+        instance_ids = [
+            inst["id"] for inst in benchmarks.INSTANCES
+            if inst["id"] in benchmark_instances and
+               inst["property"]["type"] == property_type and
+               inst["property"]["dir"] == direction
+        ]
+        rows = [[]]
+        for inst_id in instance_ids:
+            instance = benchmark_instances[inst_id]
+            cut_id = f"cut-best-in-{timelimit}s"
+            clip_id = f"clip-best-in-{timelimit}s"
+            discr_id = f"discr-best-in-{timelimit}s"
+            underapproximation_highlights = best_approximation_configs(
+                exec_data, inst_id, [cut_id, clip_id], direction, "under", timelimit
+            )
+            overapproximation_highlights = best_approximation_configs(
+                exec_data, inst_id, [discr_id, "mdp"], direction, "over", timelimit
+            )
+            mdp = get_result(exec_data, storm.NAME, "mdp", inst_id)
+            if is_successful_result(mdp, timelimit):
+                mdp_highlighted = "mdp" in overapproximation_highlights
+                mdp_cell = dissertation_cell(
+                    latex_result(mdp["result"], mdp_highlighted),
+                    mdp["wallclock-time"],
+                    highlight=mdp_highlighted,
+                )
+            else:
+                mdp_cell = dissertation_cell(unavailable_result_cell(exec_data, ["mdp"], inst_id))
+            rows.append([
+                dissertation_model(instance),
+                dissertation_property(instance),
+                dissertation_result_cell(exec_data, inst_id, "cut", timelimit, cut_id in underapproximation_highlights),
+                dissertation_result_cell(exec_data, inst_id, "clip", timelimit, clip_id in underapproximation_highlights),
+                dissertation_result_cell(exec_data, inst_id, "discr", timelimit, discr_id in overapproximation_highlights),
+                mdp_cell,
+            ])
+        save_latex(rows, "|c|c|r|r|r|r|", "\n& ".join(result_headers), os.path.join(OUT_DIR, filename), grid=True)
+
+def dissertation_value_cell(exec_data, inst_id, config_id, bold=False, configuration=None):
+    result = get_result(exec_data, storm.NAME, config_id, inst_id)
+    belief_states = "--"
+    if result is not None and "belief-mdp" in result and "states" in result["belief-mdp"]:
+        belief_states = rf"$|S|={result['belief-mdp']['states']}$"
+    if is_successful_result(result):
+        lines = [latex_result(result["result"], bold), f"{latex_time(result['wallclock-time'])}s", belief_states]
+        if configuration is not None:
+            lines.append(configuration)
+        return r"\shortstack[r]{{{}}}".format(r"\\".join(lines))
+    status = unavailable_result_cell(exec_data, [config_id], inst_id)
+    if is_resource_limit_status(status):
+        return resource_limit_cell(status)
+    lines = [status, "--", belief_states]
+    if configuration is not None:
+        lines.append(configuration)
+    return r"\shortstack[r]{{{}}}".format(r"\\".join(lines))
+
+def best_approximation_configs(exec_data, inst_id, config_ids, direction, approximation="over", maxtime=None):
+    candidates = {}
+    for config_id in config_ids:
+        result = get_result(exec_data, storm.NAME, config_id, inst_id)
+        if is_successful_result(result, maxtime):
+            _, value = parse_result_value(result["result"])
+            candidates[config_id] = (float(f"{value:.3g}"), result["wallclock-time"])
+    if len(candidates) == 0:
+        return set()
+    select_value = max if (approximation == "over") == (direction == "min") else min
+    best_value = select_value(value for value, _ in candidates.values())
+    best_value_candidates = {
+        config_id: runtime for config_id, (value, runtime) in candidates.items()
+        if value == best_value
+    }
+    best_runtime = min(best_value_candidates.values())
+    return {config_id for config_id, runtime in best_value_candidates.items() if runtime == best_runtime}
+
+def save_overapproximation_table(exec_data, benchmark_instances):
+    shown_resolutions = [4, 7, 12]
+    all_resolutions = list(range(2, 13))
+    first_header = "\n& ".join(
+        ["Model", "Property"] +
+        [rf"\multicolumn{{2}}{{c|}}{{$\resolution={resolution}$}}" for resolution in shown_resolutions] +
+        ["Best discr.", "MDP"]
+    )
+    second_header = "\n& ".join(
+        ["", ""] +
+        [mode for _ in shown_resolutions for mode in ["static", "dyn."]] +
+        ["", ""]
+    )
+    header = first_header + r"\\ \hline" + "\n" + second_header
+
+    column_spec = "|c|c|" + "r|" * (2 * len(shown_resolutions) + 2)
+    objective_tables = [
+        ("prb", "min", "tableoverapproxprbmin.tex"),
+        ("prb", "max", "tableoverapproxprbmax.tex"),
+        ("rew", "min", "tableoverapproxrewmin.tex"),
+        ("rew", "max", "tableoverapproxrewmax.tex"),
+    ]
+    for property_type, direction, filename in objective_tables:
+        rows = [[]]
+        for benchmark in benchmarks.INSTANCES:
+            if benchmark["property"]["type"] != property_type or benchmark["property"]["dir"] != direction:
+                continue
+            inst_id = benchmark["id"]
+            if inst_id not in benchmark_instances:
+                continue
+            instance = benchmark_instances[inst_id]
+            all_discretization_ids = [
+                f"discr{resolution:03}{mode}"
+                for resolution in all_resolutions for mode in ["s", "d"]
+            ]
+            best_discretization_ids = best_approximation_configs(
+                exec_data, inst_id, all_discretization_ids, instance["property-dir"]
+            )
+            best_discretization_id = next(
+                config_id for config_id in all_discretization_ids
+                if config_id in best_discretization_ids
+            )
+            highlighted_ids = best_approximation_configs(
+                exec_data, inst_id, [best_discretization_id, "mdp"], instance["property-dir"]
+            )
+            row = [dissertation_model(instance), dissertation_property(instance)]
+            for resolution in shown_resolutions:
+                row += [
+                    dissertation_value_cell(exec_data, inst_id, f"discr{resolution:03}s"),
+                    dissertation_value_cell(exec_data, inst_id, f"discr{resolution:03}d"),
+                ]
+            row += [
+                dissertation_value_cell(
+                    exec_data,
+                    inst_id,
+                    best_discretization_id,
+                    best_discretization_id in highlighted_ids,
+                    latex_configuration_parameter("discr", best_discretization_id),
+                ),
+                dissertation_value_cell(exec_data, inst_id, "mdp", "mdp" in highlighted_ids),
+            ]
+            rows.append(row)
+        save_latex(rows, column_spec, header, os.path.join(OUT_DIR, filename), grid=True)
+
+
+def underapproximation_value_cell(exec_data, inst_id, config_id, bold=False):
+    result = get_result(exec_data, storm.NAME, config_id, inst_id)
+    belief_states = "--"
+    if result is not None and "belief-mdp" in result and "states" in result["belief-mdp"]:
+        belief_states = rf"$|S|={result['belief-mdp']['states']}$"
+    if is_successful_result(result):
+        return r"\shortstack[r]{{{}\\{}s\\{}}}".format(
+            latex_result(result["result"], bold),
+            latex_time(result["wallclock-time"]),
+            belief_states,
+        )
+    status = unavailable_result_cell(exec_data, [config_id], inst_id)
+    if is_resource_limit_status(status):
+        return resource_limit_cell(status)
+    return r"\shortstack[r]{{{}\\--\\{}}}".format(
+        status,
+        belief_states,
+    )
+
+
+def underapproximation_rows(exec_data, benchmark_instances, property_type, direction, config_ids):
+    rows = [[]]
+    for benchmark in benchmarks.INSTANCES:
+        if benchmark["property"]["type"] != property_type or benchmark["property"]["dir"] != direction:
+            continue
+        inst_id = benchmark["id"]
+        if inst_id not in benchmark_instances:
+            continue
+        best_ids = best_approximation_configs(
+            exec_data, inst_id, config_ids, direction, approximation="under"
+        )
+        rows.append([
+            dissertation_model(benchmark_instances[inst_id]),
+            dissertation_property(benchmark_instances[inst_id]),
+        ] + [
+            underapproximation_value_cell(exec_data, inst_id, config_id, config_id in best_ids)
+            for config_id in config_ids
+        ])
+    return rows
+
+
+def save_underapproximation_tables(exec_data, benchmark_instances):
+    objective_tables = [
+        ("prb", "min", "prbmin"),
+        ("prb", "max", "prbmax"),
+        ("rew", "min", "rewmin"),
+        ("rew", "max", "rewmax"),
+    ]
+
+    cutoff_exponents = [0] + list(range(8, 33))
+    cutoff_ids = [f"cut{exponent:02}" for exponent in cutoff_exponents]
+    cutoff_headers = [
+        r"$c=\mathrm{heur.}$" if exponent == 0 else rf"$c=2^{{{exponent}}}$"
+        for exponent in cutoff_exponents
+    ]
+    cutoff_header = "\n& ".join(["Model", "Property"] + cutoff_headers)
+    cutoff_column_spec = "|c|c|" + "r|" * len(cutoff_ids)
+
+    clipping_thresholds = [0, 8, 12, 16]
+    clipping_resolutions = list(range(2, 6))
+    clipping_ids = [
+        f"clip{threshold:02}res{resolution:02}"
+        for threshold in clipping_thresholds
+        for resolution in clipping_resolutions
+    ]
+    clipping_first_header = "\n& ".join(
+        ["Model", "Property"] + [
+            rf"\multicolumn{{{len(clipping_resolutions)}}}{{c|}}{{{r'$c=\mathrm{heur.}$' if threshold == 0 else rf'$c=2^{{{threshold}}}$'}}}"
+            for threshold in clipping_thresholds
+        ]
+    )
+    clipping_second_header = "\n& ".join(
+        ["", ""] + [
+            rf"$\resolution={resolution}$"
+            for _ in clipping_thresholds
+            for resolution in clipping_resolutions
+        ]
+    )
+    clipping_header = clipping_first_header + r"\\ \hline" + "\n" + clipping_second_header
+    clipping_column_spec = "|c|c|" + "r|" * len(clipping_ids)
+
+    for property_type, direction, filename_suffix in objective_tables:
+        save_latex(
+            underapproximation_rows(
+                exec_data, benchmark_instances, property_type, direction, cutoff_ids
+            ),
+            cutoff_column_spec,
+            cutoff_header,
+            os.path.join(OUT_DIR, f"tablecut{filename_suffix}.tex"),
+            grid=True,
+        )
+        save_latex(
+            underapproximation_rows(
+                exec_data, benchmark_instances, property_type, direction, clipping_ids
+            ),
+            clipping_column_spec,
+            clipping_header,
+            os.path.join(OUT_DIR, f"tableclip{filename_suffix}.tex"),
+            grid=True,
+        )
+
+
+def time_result_plot_series(exec_data, inst_id, cfgbase, start_time=0.01, end_time=3600):
+    benchmark = benchmarks.from_id(inst_id)
+    expected_relation = expected_bound_relation(cfgbase, benchmark)
+    increasing = expected_relation == "≥"
+    data = []
+    for config in storm.CONFIGS:
+        if not config["id"].startswith(cfgbase):
+            continue
+        result = get_result(exec_data, storm.NAME, config["id"], inst_id)
+        if not is_successful_result(result):
+            continue
+        relation, value = parse_result_value(result["result"])
+        if relation not in ["=", expected_relation]:
+            raise ValueError(
+                f"Expected a '{expected_relation}' bound, got '{result['result']}' in {result['id']}"
+            )
+        data.append((result["wallclock-time"], value))
+
+    data.sort()
+    if len(data) == 0:
+        return []
+
+    if benchmark["property"]["type"] == "prb":
+        # Probability objectives have a trivial bound that is available before
+        # any configuration finishes.
+        initial_value = 0.0 if increasing else 1.0
+        series = [(start_time, initial_value)]
+        remaining_data = data
+    else:
+        # Do not make the first reward bound appear available before the run
+        # that computed it has finished.
+        first_runtime, first_value = data[0]
+        series = [(first_runtime, first_value)]
+        remaining_data = data[1:]
+
+    for runtime, value in remaining_data:
+        previous_value = series[-1][1]
+        if increasing and previous_value >= value:
+            continue
+        if not increasing and previous_value <= value:
+            continue
+        # Keep the incumbent result until the improving run finishes, then
+        # change vertically to the newly available result.
+        series.append((runtime, previous_value))
+        series.append((runtime, value))
+    series.append((end_time, series[-1][1]))
+    return series
+
+
+def save_time_result_csv(exec_data, benchmark_instances):
+    header = []
+    series_contents = []
+    for cfgbase in ["cut", "clip", "discr"]:
+        for benchmark in benchmarks.INSTANCES:
+            inst_id = benchmark["id"]
+            if inst_id not in benchmark_instances:
+                continue
+            series_name = f"{cfgbase}.{inst_id}"
+            header.extend([f"{series_name}.time", f"{series_name}.result"])
+            series_contents.append(time_result_plot_series(exec_data, inst_id, cfgbase))
+
+    table = [header]
+    num_rows = max((len(series) for series in series_contents), default=0)
+    for row_index in range(num_rows):
+        row = []
+        for series in series_contents:
+            row.extend(series[row_index] if row_index < len(series) else ["", ""])
+        table.append(row)
+    save_csv(table, os.path.join(OUT_DIR, "time_result.csv"))
+
+    with open(os.path.join(OUT_DIR, "time_result_plots.tex"), "w") as plot_file:
+        plot_file.write("% Generated by scripts/postprocess.py.\n")
+        plot_count = 0
+        for benchmark in benchmarks.INSTANCES:
+            inst_id = benchmark["id"]
+            if inst_id not in benchmark_instances:
+                continue
+            if plot_count > 0 and plot_count % 9 == 0:
+                plot_file.write("\\clearpage\n")
+            command = (
+                "\\defaulttimeresplot" if benchmark["property"]["type"] == "prb"
+                else "\\defaulttimeresplotauto"
+            )
+            plot_count += 1
+            plot_file.write(f"{command}{{{inst_id}}}{{0.01}}{{3600}}%\n")
+            plot_file.write("\\par\\medskip\n" if plot_count % 3 == 0 else "\\hfill\n")
 
 
 def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
@@ -535,9 +1088,9 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
                     v = "{}..{}".format(to_latex(min(value)), to_latex(max(value)))
         elif type(value) == str and value.startswith("(") and value.endswith(")"):
             v = "{}".format(value[1:-1])
-        elif type(value) == str and data_kind == "result" and value[:2] in ["≤ ", "≥ "]:
-            v = r"$\{}$ {}".format("le" if value[0] == "≤" else "ge", to_latex(float(value[2:]), ))
-            data_kind = None # do not add $ for the value
+        elif type(value) == str and data_kind == "result":
+            v = latex_result(value)
+            data_kind = None # latex_result already formats the relation
         elif type(value) == str and data_kind == "name":
             value = value.replace("resources", "resrc").replace("obstacle", "obstcl").replace("service", "serv")
             v = f"\\model{{{value}}}"
@@ -615,14 +1168,19 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
                         value[0] = to_html("{} / {}".format(res["result"], value[0]))
             elif kind.startswith("latex"):
                 res = get_result(exec_data, tool, column[1], inst)
-                if res is None or "result" not in res or res["result"] in ["≥ 0", "≤ 1"]:
+                if res is None or "result" not in res:
                     value = r"\multicolumn{1}{c}{-}"
+                elif not is_successful_result(res):
+                    pass # Keep the TO/MO/ERR marker selected above.
                 else:
-                    assert res["result"][:2] in ["≤ ", "≥ "]
+                    relation, result_number = parse_result_value(res["result"])
+                    if relation != "=" and result_number == (1.0 if relation == "≤" else 0.0):
+                        value = r"\multicolumn{1}{c}{-}"
+                        return value
                     asterisk = ""
                     if "--belief-exploration unfold" in res["commands"][0] and "belief-mdp-incomplete" not in res:
                         asterisk = "$^*$"
-                    value = "{} ({}s){}".format(to_latex(float(res["result"][2:])), value, asterisk)
+                    value = "{} ({}s){}".format(latex_result(res["result"]), value, asterisk)
         else: # column[0] is a key in benchmark_instances, column[1] is either not present or a function that applies a transformation
             if column[0] in benchmark_instances[inst]:
                 value = benchmark_instances[inst][column[0]]
@@ -733,56 +1291,6 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
             new_cells.append([row_cpy[i] for i in range(len(row_cpy)) if i not in cols_to_remove])
         return new_cells
 
-    def get_time_result_list_for_plot(cfgbase, inst_id):
-        datalist = []
-        is_increasing = False
-        is_decreasing = False
-        for cfg in [c for c in storm.CONFIGS if c["id"].startswith(cfgbase)]:
-            res = get_result_if_supported(exec_data, storm.NAME, cfg["id"], inst_id)
-            if res is not None and "result" in res:
-                assert res["result"][:2] in ["≤ ", "≥ "], f"Unexpected result string: {res['result']}"
-                is_increasing = is_increasing or res["result"][:2] == "≥ " # lower bounds should be increasing over time
-                is_decreasing = is_decreasing or res["result"][:2] == "≤ " # upper bounds should be decreasing over time
-                assert not is_increasing or not is_decreasing, f"Unexpected result string: {res['result']}"
-                datalist.append((res["wallclock-time"], float(res["result"][2:])))
-        datalist = sorted(datalist)
-        if len(datalist) == 0: return []
-        result = [(0.01, 0.0 if is_increasing else 1.0)]
-        for t,r in datalist:
-            prev_r = result[-1][1]
-            # discard bounds that are worse than what is already known
-            if is_increasing and prev_r > r: continue
-            if is_decreasing and prev_r < r: continue
-            result.append((t,prev_r)) # results in a 'stair' form for the plot
-            result.append((t,r))
-        result.append((3600, result[-1][1]))
-        return result
-
-    def create_time_result_csv():
-        header = []
-        column_contents = []
-        cfgbases = storm.BASE_CONFIGS + getattr(storm, "REG_BASE_CONFIGS", [])
-        for cfgbase, inst_id in itertools.product(cfgbases, benchmark_instances.keys()):
-            header += [f"{cfgbase}.{strip_benchmark_set_prefix(inst_id)}.{postfix}" for postfix in ["time", "result"]]
-            column_contents.append(get_time_result_list_for_plot(cfgbase, inst_id))
-
-        table = [header]
-        num_rows = max([len(c) for c in column_contents])
-        for row_index in range(num_rows):
-            row = []
-            for col in column_contents:
-                if row_index < len(col):
-                    row += [col[row_index][0], col[row_index][1]]
-                else:
-                    row += ["", ""]
-            table.append(row)
-
-        save_csv(table, os.path.join(OUT_DIR, f"{prefix}time_result.csv"))
-        with open(os.path.join(OUT_DIR, f"{prefix}time_result.tex"), 'w') as f:
-            for inst in benchmark_instances.keys():
-                f.write("\\defaulttimeresplot{{{}}}{{0.1}}{{3600}}\n".format(strip_benchmark_set_prefix(inst).replace("_", r"\_")))
-
-
     def export_data_for_kind(kind):
         # get the columns relevant for this kind
         if kind.startswith("latex"):
@@ -819,8 +1327,6 @@ def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
     # invoke generation for all kinds
     if len(benchmark_instances) == 0: return
     for kind in export_kinds: export_data_for_kind(kind)
-#    create_time_result_csv()
-
 if __name__ == "__main__":
     print("Benchmarking tool.")
     print("This script gathers data of executions and exports them in various ways.")
@@ -852,7 +1358,10 @@ if __name__ == "__main__":
 
 
     export_kinds = ["default", "scatter", "quantile", "html", "latexbenchmarks"] + [f"latext{t}" for t in storm.META_CONFIG_TIMELIMITS]
-    export_data(exec_data, get_benchmark_subset(["drone"]), export_kinds, prefix="drone-")
-    export_data(exec_data, get_benchmark_subset(["network2"]), export_kinds, prefix="netw2-")
-    export_data(exec_data, get_benchmark_subset(["network-priorities2"]), export_kinds, prefix="netwp2-")
-
+    #export_data(exec_data, get_benchmark_subset(["drone"]), export_kinds, prefix="drone-")
+    #export_data(exec_data, get_benchmark_subset(["network2"]), export_kinds, prefix="netw2-")
+    #export_data(exec_data, get_benchmark_subset(["network-priorities2"]), export_kinds, prefix="netwp2-")
+    save_dissertation_tables(exec_data, benchmark_instances, storm.META_CONFIG_TIMELIMITS[0])
+    save_overapproximation_table(exec_data, benchmark_instances)
+    save_underapproximation_tables(exec_data, benchmark_instances)
+    save_time_result_csv(exec_data, benchmark_instances)

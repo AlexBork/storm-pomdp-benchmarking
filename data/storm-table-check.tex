@@ -1,0 +1,146 @@
+\documentclass{article}
+\usepackage{adjustbox}
+\usepackage[table]{xcolor}
+\usepackage[landscape,margin=1cm]{geometry}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{ifthen}
+\pgfplotsset{compat=1.18}
+\input{rwth_color_scheme.tex}
+
+\newcommand{\model}[1]{\textsc{#1}}
+\newcommand{\resolution}{\ensuremath{\eta}}
+
+\newcommand{\checktable}[1]{%
+  \begin{adjustbox}{max totalsize={\textwidth}{0.9\textheight},center}
+    \input{#1}
+  \end{adjustbox}
+  \clearpage
+}
+
+
+\colorlet{colorcut}{RWTHmaygreen}
+\colorlet{colorclip}{RWTHbordeaux}
+\colorlet{colordiscr}{RWTHblue}
+
+\tikzset{
+  cutstyle/.style={colorcut, mark=o},
+  clipstyle/.style={colorclip, mark=star},
+  discrstyle/.style={colordiscr, mark=triangle},
+}
+
+\newcommand{\Addlegendentry}[2][]{\ifx\pgfplots@currentplot@firstcoord@x\pgfutil@empty
+% \addlegendimage{nan legend}
+% \addlegendentry[#1]{#2}
+\else
+\addlegendentry[#1]{#2}
+\fi
+}
+
+\tikzstyle{plotlegendshiftmid} = [xshift=-50pt]
+\tikzstyle{plotlegendshiftleft} = [xshift=-100pt]
+\tikzstyle{plotlegendshiftright} = [xshift=12pt]
+\newcommand{\plotlegendshift}{plotlegendshiftmid}
+\pgfplotsset{defaultplot/.style={
+width=4.5cm,
+height=4.5cm,
+axis x line=bottom,
+axis y line=left,
+unbounded coords=discard,
+filter discard warning=false, % properly deal with missing data points
+x label style={yshift=4pt},
+y label style={yshift=-2pt},
+yticklabel style={font=\small},
+xticklabel style={font=\small},
+legend columns=-1,
+legend cell align={left},
+/pgfplots/legend image code/.code={\draw[mark repeat=2,mark phase=2,#1] plot coordinates {(0cm,0cm) (0.3cm,0cm)};}, % make the legend lines a bit smaller,
+every axis plot/.append style={ thick},
+}}
+
+\newcommand{\boundingboxlegend}{\pgfresetboundingbox\useasboundingbox (-1.1,-0.9) rectangle (3.05,3.8);}
+\newcommand{\boundingboxnolegend}{\pgfresetboundingbox\useasboundingbox (-1.1,-0.9) rectangle (3.05,2.88);}
+
+\newcommand{\timeresplot}[7]{%
+% Arguments:
+% #1: benchmark instance
+% #2: comma separated list of basecfg/style items
+% #3: comma separated list of readable config names or 'false' if no legend should be shown
+% #4: mintime
+% #5: maxtime
+% #6: minvalue
+% #7: maxvalue
+\ifthenelse{\equal{#6}{}}%
+  {\pgfplotsset{currentvaluerange/.style={}}}%
+  {\pgfplotsset{currentvaluerange/.style={ymin=#6,ymax=#7}}}%
+\begin{tikzpicture}
+\begin{axis}[
+defaultplot,
+xmin=#4,
+xmax=#5,
+currentvaluerange,
+xmode=log,
+xlabel=time (seconds),
+title={\texttt{\detokenize{#1}}},
+title style={font=\tiny,yshift=6pt},
+%ymajorgrids,
+%ytick= {1, 6, 60, 600, 1200, 1800 },
+% yticklabels={$\le$1, 6, 60, 600, 1200, 1800},
+ylabel=value bounds,
+%ylabel={$ \mathsf{Pr}_{\max}^{\pomdp}\left(\costEventually{\costboundset} \ T\right)$},
+%	y label style={at={(axis description cs:-0.1,0.5)},anchor=south},
+log ticks with fixed point, % enable to avoid 10^-x notation
+scaled x ticks=false,
+%legend pos=north west,
+legend style={nodes={scale=0.65, transform shape},inner sep=1pt, anchor=south, yshift=4pt, \plotlegendshift},
+	]
+\foreach \basecfg/\plotstyle in {#2}{%
+		\edef\loopbody{
+			\noexpand\addplot[\plotstyle, mark repeat=2, mark phase=2]
+			table [x={\basecfg.#1.time},y={\basecfg.#1.result}, col sep=tab]
+			{time_result.csv};
+		}
+		\loopbody
+}
+\ifthenelse{\equal{#3}{false}}{}{\legend{#3}}
+\end{axis}
+\ifthenelse{\equal{#3}{false}}{\boundingboxnolegend}{\boundingboxlegend}
+\end{tikzpicture}%
+}
+
+
+\newcommand{\defaulttimeresplot}[4][Cut-Off,Clipping,Discretisation]{%
+\timeresplot{#2}{cut/cutstyle,clip/clipstyle,discr/discrstyle}{#1}{#3}{#4}{0}{1.04}%
+}
+\newcommand{\defaulttimeresplotauto}[4][Cut-Off,Clipping,Discretisation]{%
+\timeresplot{#2}{cut/cutstyle,clip/clipstyle,discr/discrstyle}{#1}{#3}{#4}{}{}%
+}
+\newcommand{\defaulttimeresplotnolegend}[3]{\defaulttimeresplot[]{#1}{#2}{#3}}
+\newcommand{\defaulttimeresplotleft}[3]{{\renewcommand{\plotlegendshift}{plotlegendshiftright}\defaulttimeresplot{#1}{#2}{#3}}} % shows legend
+\newcommand{\defaulttimeresplotright}[3]{\defaulttimeresplot[]{#1}{#2}{#3}} % no legend but same bounding box as left
+\newcommand{\defaulttimeresplotleftnolegend}[3]{\defaulttimeresplot[false]{#1}{#2}{#3}} 
+\newcommand{\defaulttimeresplotrightlegend}[3]{{\renewcommand{\plotlegendshift}{plotlegendshiftleft}\defaulttimeresplot{#1}{#2}{#3}}} %
+\newcommand{\defaulttimeresplotmidlegend}[3]{{\renewcommand{\plotlegendshift}{plotlegendshiftmid}\defaulttimeresplot{#1}{#2}{#3}}} %
+
+\begin{document}
+\checktable{tablebenchmarks.tex}
+\checktable{tableprbmin.tex}
+\checktable{tableprbmax.tex}
+\checktable{tablerewmin.tex}
+\checktable{tablerewmax.tex}
+\checktable{tableoverapproxprbmin.tex}
+\checktable{tableoverapproxprbmax.tex}
+\checktable{tableoverapproxrewmin.tex}
+\checktable{tableoverapproxrewmax.tex}
+\checktable{tablecutprbmin.tex}
+\checktable{tablecutprbmax.tex}
+\checktable{tablecutrewmin.tex}
+\checktable{tablecutrewmax.tex}
+\checktable{tableclipprbmin.tex}
+\checktable{tableclipprbmax.tex}
+\checktable{tablecliprewmin.tex}
+\checktable{tablecliprewmax.tex}
+
+\clearpage
+\input{time_result_plots.tex}
+\end{document}

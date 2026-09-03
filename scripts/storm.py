@@ -54,7 +54,7 @@ for i in range(8,33):
     cutoff_cfg["notes"] += [f"Under-Approximation with cut-offs, size threshold 2^{i}"]
     CONFIGS.append(cutoff_cfg)
 
-for i in [8,12,16]:
+for i in range(8,33):
     for j in range(2, 6):
         clip_cfg = copy.deepcopy(base_cfg)
         clip_cfg["id"] = f"clip{i:02}res{j:02}"
