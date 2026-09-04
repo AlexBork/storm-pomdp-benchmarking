@@ -10,6 +10,8 @@ configurations:
 - `cutoff` selects every declared cut-off configuration, including `cut00`.
 - `clipping` selects every declared clipping configuration, including the
   heuristic `clip00res*` variants.
+- `clip-mini` selects only `clip16res02` (threshold $2^{16}$ and clipping
+  resolution 2).
 - `MDP` selects the fully observable MDP configuration.
 
 Every interactive menu displays numbered options; enter the number shown to

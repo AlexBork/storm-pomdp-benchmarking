@@ -70,6 +70,7 @@ CONFIGURATION_FAMILY_DESCRIPTIONS = OrderedDict(
         ("discretisation", "all declared discretisation configurations"),
         ("cutoff", "all declared cut-off configurations"),
         ("clipping", "all declared clipping configurations"),
+        ("clip-mini", "only clip16res02 (threshold 2^16, clipping resolution 2)"),
         ("MDP", "the underlying fully observable MDP configuration"),
     ]
 )
@@ -79,11 +80,19 @@ def configuration_family_options(configurations):
     """Return selector options that expand a method family to all its configurations."""
     options = OrderedDict()
     for family, description in CONFIGURATION_FAMILY_DESCRIPTIONS.items():
-        count = len([configuration for configuration in configurations if configuration.get("family") == family])
+        count = len([
+            configuration for configuration in configurations
+            if family in configuration_selection_groups(configuration)
+        ])
         options[family] = [description, f"{count} configuration(s)"]
     unclassified = [configuration["id"] for configuration in configurations if configuration.get("family") not in options]
     assert not unclassified, f"Configuration(s) without a known family: {', '.join(unclassified)}"
     return options
+
+
+def configuration_selection_groups(configuration):
+    """Return the primary family and any additional interactive selection groups."""
+    return [configuration["family"], *configuration.get("selection-groups", [])]
 
 
 def default_tool_binaries():
@@ -184,7 +193,10 @@ def create_invocations():
 
     cfg_options = configuration_family_options(tool_configs)
     cfg_selection = input_selection("Configuration Families", cfg_options)
-    cfgs = [c for c in tool_configs if c["family"] in cfg_selection]
+    cfgs = [
+        configuration for configuration in tool_configs
+        if any(group in cfg_selection for group in configuration_selection_groups(configuration))
+    ]
     print(f"Selected {len(cfgs)} configuration(s) from: {', '.join(cfg_selection)}.")
     for cfg in cfgs:
         for cmd in get_command_lines(tool_binaries, cfg):

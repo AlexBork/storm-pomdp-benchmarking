@@ -61,6 +61,8 @@ for i in range(8,33):
         clip_cfg["family"] = "clipping"
         clip_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold {2**i}", f"--use-clipping", f"--clip-resolution {j}"]
         clip_cfg["notes"] += [f"Under-Approximation with clipping, size threshold 2^{i}, clipping resolution {j}"]
+        if i == 16 and j == 2:
+            clip_cfg["selection-groups"] = ["clip-mini"]
         CONFIGS.append(clip_cfg)
 
 cutoff_default_cfg = copy.deepcopy(base_cfg)
