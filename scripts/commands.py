@@ -207,7 +207,7 @@ def create_invocations():
     invocations = create_invocation_data(instances, cfgs, tool_binaries, time_limit=0, log_dir="")
     print(f"Selected {len(invocations)} invocations.")
 
-    time_limit = int(ask_user_for_info(f"Enter a time limit (in seconds):", "1800", lambda usr_in : usr_in.isdigit()))
+    time_limit = int(ask_user_for_info(f"Enter a time limit (in seconds):", "900", lambda usr_in : usr_in.isdigit()))
     log_dir = ask_user_for_info(f"Enter a logfile directory ", f"logs{date.today()}")
     if not os.path.exists(log_dir): os.makedirs(log_dir)
     inv_name = ask_user_for_info(f"Enter a file for storing the invocation information ", f"inv{date.today()}.json", ask_user_overwrite_file)

@@ -122,7 +122,7 @@
   following the tool-paper convention; a kill alone does not establish its cause.
   CUT reaches 33.5 million states at $\tau=2^{25}$ in 542\,s;
   at $2^{26}$ it is killed after 546\,s, well before the time limit.
-  Across all 950 explicit-threshold CUT runs, 177 are killed and only 2 time out.
+  Across all 850 explicit-threshold CUT runs, 163 are killed and only 2 time out.
 }
 \checkplot{CUT outcomes across all benchmark instances: heatmap.}{%
   \input{tikzpictures/cut-outcomes-heatmap.tex}%
@@ -131,8 +131,8 @@
   columns show explicit thresholds $2^8$ through $2^{32}$. Cells show success,
   timeout (TO), or MO$^*$. The 1,800\,s limit applies to each run. MO$^*$ groups
   allocation failures and non-timeout SIGKILLs; a kill alone does not establish
-  its cause. All 38 instances are included. At $2^{32}$, 25 runs are classified
-  MO$^*$ and 13 succeed. Across the sweep, 177 runs are killed and 2 time out.
+  its cause. All 34 instances are included. At $2^{32}$, 23 runs are classified
+  MO$^*$ and 11 succeed. Across the sweep, 163 runs are killed and 2 time out.
 }
 \checkplot{CUT: bound improvement and exploration limits across all instances.}{%
   \input{tikzpictures/cut-bound-overview.tex}%
@@ -142,17 +142,17 @@
   $100|b-b^\star|/\max(|b|,|b^\star|)$ (zero when both are zero).
   Lower is better; zero matches the best observed bound, rather than certifying
   optimality. Comparisons use precision $10^{-6}$. Boxes show quartiles and
-  medians, with minimum--maximum whiskers. All 38 instances are eligible,
+  medians, with minimum--maximum whiskers. All 34 instances are eligible,
   including those unchanged from the smallest threshold. Failed runs supply no
   bound and are counted in the lower panel, so the sample changes with threshold.
-  Of the 38 instances, 31 obtain a tighter bound than at $2^8$; all 38 runs
+  Of the 34 instances, 27 obtain a tighter bound than at $2^8$; all 34 runs
   still succeed at $2^{24}$. The 1,800\,s per-run limit applies throughout.
   MO$^*$ includes non-timeout SIGKILLs, whose cause is not confirmed by the logs.
 }
 \checkplot{Combining bounds: interval tightness across all instances.}{%
   \input{tikzpictures/combined-bounds.tex}%
 }{%
-  Counts of all 38 instances whose paired bounds satisfy the relative-width
+  Counts of all 34 instances whose paired bounds satisfy the relative-width
   tolerance $100(U-L)/\max(|L|,|U|)$; higher is better. Matching bounds count at
   every positive tolerance. Best tested configurations use successful runs
   within 1,800\,s, preferring exact results and breaking ties by runtime;
@@ -164,14 +164,14 @@
 \checkplot{Discretisation error when CUT determines the optimum.}{%
   \input{tikzpictures/discretisation-exact-reference.tex}%
 }{%
-  All 13 instances with an exact CUT result $v^\star$, sorted by
+  All 11 instances with an exact CUT result $v^\star$, sorted by
   $100|b_{\mathrm{DISCR}}-v^\star|/\max(|b_{\mathrm{DISCR}}|,|v^\star|)$.
-  CUT's error is zero throughout; DISCR retains positive error on 9 instances
+  CUT's error is zero throughout; DISCR retains positive error on 7 instances
   and matches on 4. Discretisation accounts for the remaining interval on this
   exact-reference subset. The best successful DISCR configuration within
   1,800\,s is selected across both modes and resolutions 2--12; the exact CUT
   reference must also complete within 1,800\,s. Bounds are rounded to precision
-  $10^{-6}$; both-zero values have zero error. The other 25 instances have no
+  $10^{-6}$; both-zero values have zero error. The other 23 instances have no
   exact CUT reference and are excluded from this figure.
 }
 \end{document}

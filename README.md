@@ -21,10 +21,34 @@ select an option. The textual option ids, `a` (all), `c` (clear), and `d`
 Adding a configuration to one of these families in `scripts/storm.py` makes
 it available automatically in the corresponding interactive selection.
 
+## Dissertation rerun settings
+
+The new full sweep uses 32 GiB per task and a 900-second per-run timeout.
+Interactive invocation creation with `python3 scripts/run.py` now defaults to
+900 seconds. On CLAIX-2023, request the medium-memory partition explicitly:
+
+```sh
+#SBATCH --partition=c23mm
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem-per-cpu=8G
+```
+
+The memory limit is enforced by SLURM. For one invocation per array task, allow
+20 minutes of SLURM wall time so the Python runner can enforce the 15-minute
+experiment limit and finish writing its logs; it allows up to 60 seconds for
+termination. Write new results to a separate directory, such as
+`logs_diss_32_900/`, to preserve the existing measurements. Invocation files
+already created retain their stored time limits and must be regenerated for
+this rerun.
+
+The tables, plots and HTML currently exported under `data/` still describe the
+recorded 1,800-second study. They have not been relabelled as 900-second runs.
+
 ## Offline HTML results
 
-Open `data/html/index.html` in a browser to view all 4,826 recorded runs across
-38 instances and 127 configurations. The export follows the toolpaper package's
+Open `data/html/index.html` in a browser to view all 4,318 recorded runs across
+34 instances and 127 configurations. The export follows the toolpaper package's
 offline table: filter benchmarks, sort columns, show or hide entire families or
 individual configurations, and switch between bounds, runtimes, and resulting
 belief-MDP state counts. The compact reproduction preset selects resolutions
@@ -44,6 +68,16 @@ show only the beginning and end, keeping the offline export small.
 Timeouts, non-timeout SIGKILLs (`killed`), and identified memory errors are
 distinguished. Derived best-configuration selections are excluded from measured
 run counts and total runtime.
+
+The `network-priorities2` and `network-priorities3` benchmarks retain only
+priority-weighted reward maximisation (`rewmax`), following Bork et al.
+([ATVA 2020](https://arxiv.org/pdf/2007.00102),
+[TACAS 2022](https://arxiv.org/pdf/2201.08772)) and Andriushchenko et al.
+([UAI 2022](https://proceedings.mlr.press/v180/andriushchenko22a/andriushchenko22a.pdf)).
+Their dropped-packet and sent-packet objectives are excluded from the benchmark
+selection and `logs_diss_64_cleaned/`. Ordinary `network2` and `network3`
+continue to cover packet-loss minimisation. The original `logs_diss64gb/`
+archive is retained.
 
 Generate only this export from the existing parsed data, without rerunning
 experiments or regenerating the thesis tables:
@@ -190,15 +224,15 @@ example uses `N=5, R=3`, explicit thresholds `2^8`--`2^32`, and clipping
 resolutions 2 and 3. Separate runs use unconnected markers. TO and MO* are
 categorical outcomes, not numeric measurements. MO* includes non-timeout
 SIGKILLs, retained as `killed` in the source-status fields; a kill alone does
-not establish memory exhaustion. Across the 950 explicit CUT runs, 771
-succeed, 177 are killed, and 2 time out.
+not establish memory exhaustion. Across the 850 explicit CUT runs, 685
+succeed, 163 are killed, and 2 time out.
 
 CUT's bound-gap panel compares each successful bound with that instance's best
 successful explicit-threshold bound using
 `100 * abs(bound-best) / max(abs(bound), abs(best))`, with both-zero values
 defined as zero. Zero matches the observed best, not necessarily the optimum.
-All 38 instances are eligible; failures appear in the outcome panel instead
-of the numeric distribution. Of the 38 instances, 31 improve over `2^8`.
+All 34 instances are eligible; failures appear in the outcome panel instead
+of the numeric distribution. Of the 34 instances, 27 improve over `2^8`.
 
 `data/plot-data/combined-bounds/` contains selected configurations, intervals,
 cumulative counts, tolerance summaries, and exact-reference errors. The three
@@ -208,14 +242,14 @@ zero width. Each method supplies its designated interval side, reversed for
 minimisation. Family selection prefers exact results, then tighter bounds,
 then faster runs; candidates include heuristic exploration thresholds.
 Matching bounds count at every positive tolerance. At 1% tolerance, the three
-combinations cover 1, 14, and 17 instances.
+combinations cover 1, 12, and 15 instances.
 
-The exact-reference figure includes all 13 instances where CUT reports an
+The exact-reference figure includes all 11 instances where CUT reports an
 exact result. Error is
 `100 * abs(discr-optimum) / max(abs(discr), abs(optimum))`, using rounded bounds.
-CUT's error is zero throughout; DISCR retains error on nine instances and
+CUT's error is zero throughout; DISCR retains error on seven instances and
 matches on four. This attributes the remaining interval on the exact-reference
-subset; the other 25 instances have no exact CUT reference.
+subset; the other 23 instances have no exact CUT reference.
 
 The preview contains the 19 tables followed by the eight selected figures.
 Compile it from the repository root:

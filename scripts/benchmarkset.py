@@ -115,13 +115,11 @@ def create_instances():
 
     open_parameters = ["T", "K"]
     par_val_list = [[8, 20]]
+    # Published network-priorities benchmarks maximise priority-weighted reward;
+    # packet-loss minimisation is covered by the network models above.
     instances += create_model_instances("network-priorities2", "network-priorities2", "rewmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities2.prism", property_filename="network-priorities/network-priorities.props")
-    instances += create_model_instances("network-priorities2", "network-priorities2", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities2.prism", property_filename="network-priorities/network-priorities.props")
-    instances += create_model_instances("network-priorities2", "network-priorities2", "rewmaxpackets", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities2.prism", property_filename="network-priorities/network-priorities.props")
     par_val_list = [[8, 20]]
     instances += create_model_instances("network-priorities3", "network-priorities3", "rewmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities3.prism", property_filename="network-priorities/network-priorities.props")
-    instances += create_model_instances("network-priorities3", "network-priorities3", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities3.prism", property_filename="network-priorities/network-priorities.props")
-    instances += create_model_instances("network-priorities3", "network-priorities3", "rewmaxpackets", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities3.prism", property_filename="network-priorities/network-priorities.props")
 
     open_parameters = ["sl"]
     par_val_list = [[0], [0.1], [0.3]]
