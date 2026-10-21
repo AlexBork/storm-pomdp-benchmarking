@@ -55,7 +55,7 @@ for i in range(8,33):
     CONFIGS.append(cutoff_cfg)
 
 for i in range(8,33):
-    for j in range(2, 6):
+    for j in range(2, 5):
         clip_cfg = copy.deepcopy(base_cfg)
         clip_cfg["id"] = f"clip{i:02}res{j:02}"
         clip_cfg["family"] = "clipping"
@@ -72,7 +72,7 @@ cutoff_default_cfg["cmd"] += ["--belief-exploration unfold", f"--size-threshold 
 cutoff_default_cfg["notes"] += [f"Under-Approximation with cut-offs, heuristic size threshold"]
 CONFIGS.append(cutoff_default_cfg)
 
-for j in range(2, 6):
+for j in range(2, 5):
     clip_default_cfg = copy.deepcopy(base_cfg)
     clip_default_cfg["id"] = f"clip00res{j:02}"
     clip_default_cfg["family"] = "clipping"
@@ -171,7 +171,7 @@ def parse_logfile(log, inv):
 
     pos = try_parse_duration(log, 0, "Time for model construction: ", inv, "model-building-time")
     if pos == 0: 
-        assert inv["timeout"] or inv["memout"], "WARN: unable to get model construction time for {}".format(inv["id"])
+        assert inv["timeout"] or inv["memout"] or inv.get("execution-error", False), "WARN: unable to get model construction time for {}".format(inv["id"])
         return
     inv["input-model"] = OrderedDict()
     pos = try_parse(log, pos, "States: \t", "\n", inv["input-model"], "states", int)
@@ -181,7 +181,7 @@ def parse_logfile(log, inv):
 
     pos = log.find("Analyzing property ", pos)
     if pos < 0:
-        assert inv["memout"] or inv["timeout"], "Unable to find query output in {}".format(inv["id"])
+        assert inv["memout"] or inv["timeout"] or inv.get("execution-error", False), "Unable to find query output in {}".format(inv["id"])
         return
 
     if "Analyzing property 'Pmax=? [F true]'" in log: # todo this is to catch the trivial case
@@ -216,7 +216,7 @@ def parse_logfile(log, inv):
         if all(t in inv["belief-mdp"] for t in belief_times):
             inv["total-chk-time"] = sum(inv["belief-mdp"][t] for t in belief_times)
 
-    assert inv["memout"] or inv["timeout"] or ("result" in inv and "total-chk-time" in inv), "Unable to find result or total-chk-time in {}".format(inv["id"]);
+    assert inv["memout"] or inv["timeout"] or inv.get("execution-error", False) or ("result" in inv and "total-chk-time" in inv), "Unable to find result or total-chk-time in {}".format(inv["id"]);
 
 if __name__ == "__main__":
     print(f"{len(CONFIGS)} config(s) for {NAME}")

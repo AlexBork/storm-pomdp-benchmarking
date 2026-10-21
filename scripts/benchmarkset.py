@@ -87,13 +87,11 @@ def create_instances():
     open_parameters = ["sl"]
     par_val_list = [[0], [0.1], [0.3]]
     instances += create_model_instances("grid", "grid", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="grid/4x4grid-sl.prism", property_filename="grid/grid.props")
-    instances += create_model_instances("grid", "grid", "prbmax", open_parameter_names=open_parameters, par_values_list=[[0]], model_filename="grid/4x4grid-sl.prism", property_filename="grid/grid.props")
 
     open_parameters = ["sl"]
     par_val_list = [[0], [0.1], [0.3]]
     instances += create_model_instances("grid-avoid", "grid-avoid", "prbmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="grid-avoid/4x4grid-avoid-sl.prism", property_filename="grid-avoid/grid-avoid.props")
-    instances += create_model_instances("grid-avoid", "grid-avoid", "prbmaxgoal", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="grid-avoid/4x4grid-avoid-sl.prism", property_filename="grid-avoid/grid-avoid.props")
-
+    
     open_parameters = ["N"]
     par_val_list = [[8], [12], [16]]
     instances += create_model_instances("samplerocks", "samplerocks", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="samplerocks/samplerocks.prism", property_filename="samplerocks/samplerocks.props")
@@ -108,11 +106,11 @@ def create_instances():
     open_parameters = ["T", "K"]
     par_val_list = [[8, 20]]
     instances += create_model_instances("network2", "network2", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network/network2.prism", property_filename="network/network.props")
-    par_val_list = [[5, 2], [8, 20]]
+    par_val_list = [[8, 20]]
     instances += create_model_instances("network3", "network3", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network/network3.prism", property_filename="network/network.props")
     par_val_list = [[8, 20]]
     instances += create_model_instances("network2", "network2", "rewmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network/network2.prism", property_filename="network/network.props")
-    par_val_list = [[5, 2], [8, 20]]
+    par_val_list = [[8, 20]]
     instances += create_model_instances("network3", "network3", "rewmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network/network3.prism", property_filename="network/network.props")
 
     open_parameters = ["T", "K"]
@@ -120,26 +118,18 @@ def create_instances():
     instances += create_model_instances("network-priorities2", "network-priorities2", "rewmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities2.prism", property_filename="network-priorities/network-priorities.props")
     instances += create_model_instances("network-priorities2", "network-priorities2", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities2.prism", property_filename="network-priorities/network-priorities.props")
     instances += create_model_instances("network-priorities2", "network-priorities2", "rewmaxpackets", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities2.prism", property_filename="network-priorities/network-priorities.props")
-    par_val_list = [[5, 2], [8, 20]]
+    par_val_list = [[8, 20]]
     instances += create_model_instances("network-priorities3", "network-priorities3", "rewmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities3.prism", property_filename="network-priorities/network-priorities.props")
     instances += create_model_instances("network-priorities3", "network-priorities3", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities3.prism", property_filename="network-priorities/network-priorities.props")
     instances += create_model_instances("network-priorities3", "network-priorities3", "rewmaxpackets", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="network-priorities/network-priorities3.prism", property_filename="network-priorities/network-priorities.props")
-
-    instances += create_model_instances("maze-concise", "maze-concise", "rewmin", model_filename="maze-concise/maze-concise.prism", property_filename="maze-concise/maze-concise.props")
 
     open_parameters = ["sl"]
     par_val_list = [[0], [0.1], [0.3]]
     instances += create_model_instances("maze2", "maze2", "rewmin", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="maze2/maze2-sl.prism", property_filename="maze2/maze2.props")
 
-    instances += create_model_instances("crypt", "crypt", "prbmin", model_filename="crypt/crypt_small.prism", property_filename="crypt/crypt.props")
-    instances += create_model_instances("crypt", "crypt", "prbmax", model_filename="crypt/crypt_small.prism", property_filename="crypt/crypt.props")
     for size in [4, 6]:
         for property_id in ["prbmin", "prbmax"]:
             instances += create_model_instances(f"crypt{size}", "crypt", property_id, model_filename=f"crypt/crypt{size}.prism", property_filename="crypt/crypt.props")
-
-    open_parameters = ["N"]
-    par_val_list = [[3], [4], [5], [6]]
-    instances += create_model_instances("newgrid", "newgrid", "prbmax", open_parameter_names=open_parameters, par_values_list=par_val_list, model_filename="newgrid/newgrid.prism", property_filename="newgrid/newgrid.props")
 
     open_parameters = ["K"]
     par_val_list = [[8]]

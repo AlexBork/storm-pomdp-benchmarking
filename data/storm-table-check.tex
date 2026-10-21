@@ -1,146 +1,177 @@
-\documentclass{article}
-\usepackage{adjustbox}
+% !TeX program = lualatex
+% Compile from the repository root: lualatex --interaction=nonstopmode --halt-on-error --synctex=1 --output-directory=data data/storm-table-check.tex
+% Compiling from data/ or with pdfLaTeX also works.
+% Thesis layout, as recorded in storm-rew-bounded-benchmarking/test-results.tex.
+\documentclass[fontsize=10pt,paper=b5,twoside,DIV=11,BCOR=9mm,
+    headinclude=true,footinclude=false]{scrartcl}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage{libertine}
+\else
+  \usepackage[no-math]{fontspec}
+  \setmainfont{Linux Libertine O}
+  \setsansfont{Linux Biolinum O}
+  \setmonofont[Scale=0.875]{Droid Sans Mono}
+\fi
+\usepackage[libertine]{newtxmath}
+
+% Resolve data files from either the repository root or the data/ directory.
+\makeatletter
+\def\input@path{{data/}}
+\makeatother
 \usepackage[table]{xcolor}
-\usepackage[landscape,margin=1cm]{geometry}
-\usepackage{pgfplots}
-\usepackage{pgfplotstable}
+\usepackage{adjustbox}
+\usepackage{array}
+\usepackage{booktabs}
 \usepackage{ifthen}
+\usepackage{multirow}
+\usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
+\usepgfplotslibrary{statistics}
 \input{rwth_color_scheme.tex}
 
 \newcommand{\model}[1]{\textsc{#1}}
 \newcommand{\resolution}{\ensuremath{\eta}}
+\newcommand{\sizethreshold}{\ensuremath{\tau}}
+\newcommand*{\config}[2][]{\ifthenelse{\equal{#1}{}}{\textsc{#2}}{\textsc{#2}$_{#1}$}}
 
 \newcommand{\checktable}[1]{%
-  \begin{adjustbox}{max totalsize={\textwidth}{0.9\textheight},center}
-    \input{#1}
-  \end{adjustbox}
-  \clearpage
+  \par\begingroup\centering
+    \input{#1}\par
+  \endgroup\clearpage
 }
 
-
-\colorlet{colorcut}{RWTHmaygreen}
-\colorlet{colorclip}{RWTHbordeaux}
-\colorlet{colordiscr}{RWTHblue}
-
-\tikzset{
-  cutstyle/.style={colorcut, mark=o},
-  clipstyle/.style={colorclip, mark=star},
-  discrstyle/.style={colordiscr, mark=triangle},
+% Captions remain in the including document; generated panels embed their data.
+\newcommand{\checkplot}[3]{%
+  \par\begingroup\centering
+    {\footnotesize #2}\par\medskip
+    {\small\textbf{#1} #3\par}%
+  \endgroup\clearpage
 }
 
-\newcommand{\Addlegendentry}[2][]{\ifx\pgfplots@currentplot@firstcoord@x\pgfutil@empty
-% \addlegendimage{nan legend}
-% \addlegendentry[#1]{#2}
-\else
-\addlegendentry[#1]{#2}
-\fi
-}
-
-\tikzstyle{plotlegendshiftmid} = [xshift=-50pt]
-\tikzstyle{plotlegendshiftleft} = [xshift=-100pt]
-\tikzstyle{plotlegendshiftright} = [xshift=12pt]
-\newcommand{\plotlegendshift}{plotlegendshiftmid}
-\pgfplotsset{defaultplot/.style={
-width=4.5cm,
-height=4.5cm,
-axis x line=bottom,
-axis y line=left,
-unbounded coords=discard,
-filter discard warning=false, % properly deal with missing data points
-x label style={yshift=4pt},
-y label style={yshift=-2pt},
-yticklabel style={font=\small},
-xticklabel style={font=\small},
-legend columns=-1,
-legend cell align={left},
-/pgfplots/legend image code/.code={\draw[mark repeat=2,mark phase=2,#1] plot coordinates {(0cm,0cm) (0.3cm,0cm)};}, % make the legend lines a bit smaller,
-every axis plot/.append style={ thick},
-}}
-
-\newcommand{\boundingboxlegend}{\pgfresetboundingbox\useasboundingbox (-1.1,-0.9) rectangle (3.05,3.8);}
-\newcommand{\boundingboxnolegend}{\pgfresetboundingbox\useasboundingbox (-1.1,-0.9) rectangle (3.05,2.88);}
-
-\newcommand{\timeresplot}[7]{%
-% Arguments:
-% #1: benchmark instance
-% #2: comma separated list of basecfg/style items
-% #3: comma separated list of readable config names or 'false' if no legend should be shown
-% #4: mintime
-% #5: maxtime
-% #6: minvalue
-% #7: maxvalue
-\ifthenelse{\equal{#6}{}}%
-  {\pgfplotsset{currentvaluerange/.style={}}}%
-  {\pgfplotsset{currentvaluerange/.style={ymin=#6,ymax=#7}}}%
-\begin{tikzpicture}
-\begin{axis}[
-defaultplot,
-xmin=#4,
-xmax=#5,
-currentvaluerange,
-xmode=log,
-xlabel=time (seconds),
-title={\texttt{\detokenize{#1}}},
-title style={font=\tiny,yshift=6pt},
-%ymajorgrids,
-%ytick= {1, 6, 60, 600, 1200, 1800 },
-% yticklabels={$\le$1, 6, 60, 600, 1200, 1800},
-ylabel=value bounds,
-%ylabel={$ \mathsf{Pr}_{\max}^{\pomdp}\left(\costEventually{\costboundset} \ T\right)$},
-%	y label style={at={(axis description cs:-0.1,0.5)},anchor=south},
-log ticks with fixed point, % enable to avoid 10^-x notation
-scaled x ticks=false,
-%legend pos=north west,
-legend style={nodes={scale=0.65, transform shape},inner sep=1pt, anchor=south, yshift=4pt, \plotlegendshift},
-	]
-\foreach \basecfg/\plotstyle in {#2}{%
-		\edef\loopbody{
-			\noexpand\addplot[\plotstyle, mark repeat=2, mark phase=2]
-			table [x={\basecfg.#1.time},y={\basecfg.#1.result}, col sep=tab]
-			{time_result.csv};
-		}
-		\loopbody
-}
-\ifthenelse{\equal{#3}{false}}{}{\legend{#3}}
-\end{axis}
-\ifthenelse{\equal{#3}{false}}{\boundingboxnolegend}{\boundingboxlegend}
-\end{tikzpicture}%
-}
-
-
-\newcommand{\defaulttimeresplot}[4][Cut-Off,Clipping,Discretisation]{%
-\timeresplot{#2}{cut/cutstyle,clip/clipstyle,discr/discrstyle}{#1}{#3}{#4}{0}{1.04}%
-}
-\newcommand{\defaulttimeresplotauto}[4][Cut-Off,Clipping,Discretisation]{%
-\timeresplot{#2}{cut/cutstyle,clip/clipstyle,discr/discrstyle}{#1}{#3}{#4}{}{}%
-}
-\newcommand{\defaulttimeresplotnolegend}[3]{\defaulttimeresplot[]{#1}{#2}{#3}}
-\newcommand{\defaulttimeresplotleft}[3]{{\renewcommand{\plotlegendshift}{plotlegendshiftright}\defaulttimeresplot{#1}{#2}{#3}}} % shows legend
-\newcommand{\defaulttimeresplotright}[3]{\defaulttimeresplot[]{#1}{#2}{#3}} % no legend but same bounding box as left
-\newcommand{\defaulttimeresplotleftnolegend}[3]{\defaulttimeresplot[false]{#1}{#2}{#3}} 
-\newcommand{\defaulttimeresplotrightlegend}[3]{{\renewcommand{\plotlegendshift}{plotlegendshiftleft}\defaulttimeresplot{#1}{#2}{#3}}} %
-\newcommand{\defaulttimeresplotmidlegend}[3]{{\renewcommand{\plotlegendshift}{plotlegendshiftmid}\defaulttimeresplot{#1}{#2}{#3}}} %
+% All retained tables, followed by the selected approximation figures.
+\setlength{\parindent}{0pt}
+\raggedbottom
 
 \begin{document}
-\checktable{tablebenchmarks.tex}
-\checktable{tableprbmin.tex}
-\checktable{tableprbmax.tex}
-\checktable{tablerewmin.tex}
-\checktable{tablerewmax.tex}
-\checktable{tableoverapproxprbmin.tex}
-\checktable{tableoverapproxprbmax.tex}
-\checktable{tableoverapproxrewmin.tex}
-\checktable{tableoverapproxrewmax.tex}
-\checktable{tablecutprbmin.tex}
-\checktable{tablecutprbmax.tex}
-\checktable{tablecutrewmin.tex}
-\checktable{tablecutrewmax.tex}
-\checktable{tableclipprbmin.tex}
-\checktable{tableclipprbmax.tex}
-\checktable{tablecliprewmin.tex}
-\checktable{tablecliprewmax.tex}
-
-\clearpage
-\input{time_result_plots.tex}
+\checktable{tables-general/tablebenchmarks.tex}
+\checktable{tables-general/tableprbmin.tex}
+\checktable{tables-general/tableprbmax.tex}
+\checktable{tables-general/tablerewmin.tex}
+\checktable{tables-general/tablerewmax.tex}
+\checktable{tables-general/overapprox/tableoverapproxprbmin.tex}
+\checktable{tables-general/overapprox/tableoverapproxprbmax.tex}
+\checktable{tables-general/overapprox/tableoverapproxrewmin.tex}
+\checktable{tables-general/overapprox/tableoverapproxrewmax.tex}
+\checktable{tables-general/overapprox/tableoverapproxresolutionprbmin.tex}
+\checktable{tables-general/overapprox/tableoverapproxresolutionprbmax.tex}
+\checktable{tables-general/overapprox/tableoverapproxresolutionrewmin.tex}
+\checktable{tables-general/overapprox/tableoverapproxresolutionrewmax.tex}
+\checktable{tables-general/underapprox/tableunderapproxthreshold-examples.tex}
+\checktable{tables-general/underapprox/tableunderapproxresolution-examples.tex}
+\checktable{tables-general/underapprox/tableunderapproxprbmin.tex}
+\checktable{tables-general/underapprox/tableunderapproxprbmax.tex}
+\checktable{tables-general/underapprox/tableunderapproxrewmin.tex}
+\checktable{tables-general/underapprox/tableunderapproxrewmax.tex}
+\checkplot{Discretisation: improvement versus runtime.}{%
+  \input{tikzpictures/discretisation-budget.tex}%
+}{%
+  Each curve counts instances for which at least one successful run of that mode,
+  across resolutions 2--12, strictly tightens the MDP bound. Values are compared at
+  precision $10^{-6}$; each instance is counted once per mode. The horizontal axis
+  is the wall-clock time of an individual run, limited to 1,800\,s. Configuration
+  selection is retrospective; the cost of searching configurations and computing
+  the MDP baseline is excluded.
+}
+\checkplot{Discretisation: resolution trade-off.}{%
+  \input{tikzpictures/discretisation-resolution.tex}%
+}{%
+  Static/dynamic boxes appear left/right at each resolution. Boxes show quartiles,
+  medians, and minimum--maximum whiskers. Top: improvement over MDP normalised by
+  each instance's best observed gain across both modes and all resolutions;
+  only instances with a successful MDP baseline and positive gain are included.
+  Bottom: successful wall-clock runtimes across all instances on a logarithmic
+  axis. Runs must finish within 1,800\,s. Counts above the panels show sample
+  sizes; failed and unrun cases are omitted from the boxes.
+}
+\checkplot{Under-approximation: CUT versus CLIP runtime.}{%
+  \input{tikzpictures/cut-vs-clip-runtime.tex}%
+}{%
+  Matched exploration thresholds $\tau=2^{12}$, with clipping resolution
+  $\eta=2$. Circles denote probability objectives and triangles reward objectives.
+  Above the solid equality diagonal CLIP takes longer; dotted lines show
+  factor-of-two differences. Successful runs finish within 1,800\,s. Times at most
+  0.1\,s are grouped at the lower edge for display. The separate n/a edges denote
+  failed or unavailable runs and have no numeric runtime meaning. Bounds at
+  these settings can differ; this compares cost at equal exploration parameters,
+  rather than equal bound quality.
+}
+\checkplot{Under-approximation: Drone threshold trade-off.}{%
+  \input{tikzpictures/drone-threshold.tex}%
+}{%
+  Drone with $N=5$ and $R=3$, maximising reachability probability. CUT and CLIP
+  vary the exploration threshold from $2^8$ through $2^{32}$, showing CLIP at
+  resolutions $\eta=2$ and $\eta=3$. Top: probability lower bound (larger is
+  tighter). Bottom left: wall-clock runtime. Bottom right: resulting belief-MDP
+  state count. Both lower panels use logarithmic vertical axes. Numeric points
+  are independent successful runs completing within 1,800\,s and are shown
+  without connecting lines. Missing measurements are omitted.
+  The separate TO and MO$^*$ rows show categorical outcomes, never numeric
+  measurements. MO$^*$ groups allocation failures and non-timeout SIGKILLs,
+  following the tool-paper convention; a kill alone does not establish its cause.
+  CUT reaches 33.5 million states at $\tau=2^{25}$ in 542\,s;
+  at $2^{26}$ it is killed after 546\,s, well before the time limit.
+  Across all 950 explicit-threshold CUT runs, 177 are killed and only 2 time out.
+}
+\checkplot{CUT outcomes across all benchmark instances: heatmap.}{%
+  \input{tikzpictures/cut-outcomes-heatmap.tex}%
+}{%
+  Each row is one benchmark instance and objective, grouped by benchmark family;
+  columns show explicit thresholds $2^8$ through $2^{32}$. Cells show success,
+  timeout (TO), or MO$^*$. The 1,800\,s limit applies to each run. MO$^*$ groups
+  allocation failures and non-timeout SIGKILLs; a kill alone does not establish
+  its cause. All 38 instances are included. At $2^{32}$, 25 runs are classified
+  MO$^*$ and 13 succeed. Across the sweep, 177 runs are killed and 2 time out.
+}
+\checkplot{CUT: bound improvement and exploration limits across all instances.}{%
+  \input{tikzpictures/cut-bound-overview.tex}%
+}{%
+  Top: each successful CUT bound $b$ is compared with that instance's tightest
+  successful bound $b^\star$ across explicit thresholds $2^8$--$2^{32}$, using
+  $100|b-b^\star|/\max(|b|,|b^\star|)$ (zero when both are zero).
+  Lower is better; zero matches the best observed bound, rather than certifying
+  optimality. Comparisons use precision $10^{-6}$. Boxes show quartiles and
+  medians, with minimum--maximum whiskers. All 38 instances are eligible,
+  including those unchanged from the smallest threshold. Failed runs supply no
+  bound and are counted in the lower panel, so the sample changes with threshold.
+  Of the 38 instances, 31 obtain a tighter bound than at $2^8$; all 38 runs
+  still succeed at $2^{24}$. The 1,800\,s per-run limit applies throughout.
+  MO$^*$ includes non-timeout SIGKILLs, whose cause is not confirmed by the logs.
+}
+\checkplot{Combining bounds: interval tightness across all instances.}{%
+  \input{tikzpictures/combined-bounds.tex}%
+}{%
+  Counts of all 38 instances whose paired bounds satisfy the relative-width
+  tolerance $100(U-L)/\max(|L|,|U|)$; higher is better. Matching bounds count at
+  every positive tolerance. Best tested configurations use successful runs
+  within 1,800\,s, preferring exact results and breaking ties by runtime;
+  configuration-search time is excluded. Each method supplies its designated
+  interval side, reversed for minimisation. DISCR includes both modes;
+  CUT/CLIP include heuristic thresholds. CUT is used where CLIP fails.
+  Bounds are rounded to precision $10^{-6}$; both-zero endpoints have zero width.
+}
+\checkplot{Discretisation error when CUT determines the optimum.}{%
+  \input{tikzpictures/discretisation-exact-reference.tex}%
+}{%
+  All 13 instances with an exact CUT result $v^\star$, sorted by
+  $100|b_{\mathrm{DISCR}}-v^\star|/\max(|b_{\mathrm{DISCR}}|,|v^\star|)$.
+  CUT's error is zero throughout; DISCR retains positive error on 9 instances
+  and matches on 4. Discretisation accounts for the remaining interval on this
+  exact-reference subset. The best successful DISCR configuration within
+  1,800\,s is selected across both modes and resolutions 2--12; the exact CUT
+  reference must also complete within 1,800\,s. Bounds are rounded to precision
+  $10^{-6}$; both-zero values have zero error. The other 25 instances have no
+  exact CUT reference and are excluded from this figure.
+}
 \end{document}
