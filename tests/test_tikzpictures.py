@@ -8,9 +8,16 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import export_tikzpictures as export
+import postprocess as p
 
 
 class TikzPictureTests(unittest.TestCase):
+    def test_scatter_ticks_respect_a_non_decade_time_limit(self):
+        options = p.scatter_log_ticks(0.1, 900, failure=2000)
+        self.assertIn("xtick={0.1,1,10,100,900,2000}", options)
+        self.assertIn("ytick={0.1,1,10,100,900,2000}", options)
+        self.assertNotIn("$10^{3}$", options)
+
     def test_balanced_labels_respect_comments_and_escapes(self):
         source = r"{50\% \{text\} {nested}% ignored }" + "\nend}tail"
         value, end = export.group(source, 0)

@@ -6,10 +6,6 @@ from tools import *
 
 OUT_DIR = "data"
 TABLE_DIR = os.path.join(OUT_DIR, "tables-general")
-GENERAL_PLOT_DIR = os.path.join(OUT_DIR, "general-plots")
-RESOLUTION_VALUE_PLOT_DIR = os.path.join(GENERAL_PLOT_DIR, "resolution-value")
-RESOLUTION_TIME_PLOT_DIR = os.path.join(GENERAL_PLOT_DIR, "resolution-time")
-TIME_RESULT_PLOT_DIR = os.path.join(GENERAL_PLOT_DIR, "time-result")
 OVERAPPROX_TABLE_DIR = os.path.join(TABLE_DIR, "overapprox")
 UNDERAPPROX_TABLE_DIR = os.path.join(TABLE_DIR, "underapprox")
 LATEX_TABLE_FONT_SIZE = "scriptsize"
@@ -56,16 +52,6 @@ def latex_plot_table(table):
     ) + "\n"
 
 
-def embed_plot_data(plot, tables):
-    """Replace CSV table references with the data used to generate them."""
-    def replace_table(match):
-        options, filename = match.groups()
-        options = re.sub(r"col sep=tab", "col sep=space", options)
-        return "table[" + options + r",row sep=\\]{" + latex_plot_table(tables[filename]) + "}"
-
-    return style_latex_plot(re.sub(r"table\s*\[([^\]]*)\]\s*\{([^{}]+\.csv)\}", replace_table, plot))
-
-
 # Match the PGFPlots appearance of storm-rew-bounded-benchmarking.
 LATEX_PLOT_BEGIN = r"""% Preamble requires \usepackage{pgfplots} and \pgfplotsset{compat=1.18}.
 \begingroup
@@ -80,14 +66,14 @@ x label style={font=\small,yshift=4pt},y label style={font=\small,yshift=-2pt},
 yticklabel style={font=\small},xticklabel style={font=\small},
 legend columns=-1,legend cell align=left,
 legend style={at={(0.5,1)},anchor=south,yshift=4pt,
-    nodes={scale=0.75,transform shape},inner sep=1pt},
+    nodes={scale=0.75,transform shape},inner sep=1pt,column sep=0.5em,row sep=0.2ex},
 /pgfplots/legend image code/.code={\draw[mark repeat=2,mark phase=2,#1] plot coordinates {(0cm,0cm) (0.3cm,0cm)};},
 every axis plot/.append style={thick},
 """
 # Square comparison panels, following Figures 3 and 6 of arXiv:2301.10197.
 LATEX_SCATTER_OPTIONS = r"""scale only axis,
 width=\linewidth,height=\linewidth,
-grid=major,major grid style={draw=black!20,line width=0.25pt},
+grid=major,major grid style={draw=black!15,line width=0.25pt},
 tick align=outside,tick style={line width=0.3pt},
 xticklabel style={font=\footnotesize},yticklabel style={font=\footnotesize},
 axis line style={line width=0.4pt},
@@ -96,12 +82,6 @@ x label style={font=\small,yshift=0pt},y label style={font=\small,yshift=0pt},
 legend style={draw=black,fill=white,line width=0.3pt},
 /pgfplots/legend image code/.code={\draw[#1] plot coordinates {(0.15cm,0cm)};},
 """
-LATEX_INSTANCE_PLOT_OPTIONS = "width=4.5cm,height=4.5cm,\n" + LATEX_PLOT_OPTIONS
-LATEX_INSTANCE_PLOT_END = r"""\end{axis}
-\end{tikzpicture}
-"""
-
-
 def scatter_log_minor_ticks(lower, numeric_end, major_ticks=()):
     """Keep base-ten subdivisions throughout the numeric region, outside N/A."""
     ticks = []
@@ -118,16 +98,12 @@ def scatter_log_minor_ticks(lower, numeric_end, major_ticks=()):
 
 def scatter_log_ticks(lower, upper, failure=None):
     """Label every decade and reserve an unticked strip for unavailable values."""
-    exponents = range(round(math.log10(lower)), round(math.log10(upper)) + 1)
+    exponents = range(math.ceil(math.log10(lower)), math.floor(math.log10(upper)) + 1)
     ticks = [10 ** exponent for exponent in exponents]
-    labels = [
-        {
-            -1: r"$0.1\vphantom{10^{1}}$",
-            0: r"$1\vphantom{10^{1}}$",
-            1: r"$10\vphantom{10^{1}}$",
-        }.get(exponent, rf"$10^{{{exponent}}}$")
-        for exponent in exponents
-    ]
+    labels = [f"${tick:g}$" for tick in ticks]
+    if not any(math.isclose(upper, tick) for tick in ticks):
+        ticks.append(upper)
+        labels.append(f"${upper:g}$")
     options = scatter_log_minor_ticks(lower, upper, ticks)
     if failure is not None:
         ticks.append(failure)
@@ -576,7 +552,7 @@ def parse_result_value(result):
 def is_successful_result(data, maxtime=None):
     if data is None or "result" not in data:
         return False
-    if any(data.get(key, False) for key in ["timeout", "memout", "execution-error", "expected-error", "not-supported"]):
+    if any(data.get(key, False) for key in ["timeout", "memout", "numerical-error", "execution-error", "expected-error", "not-supported"]):
         return False
     return maxtime is None or data["wallclock-time"] <= maxtime
 
@@ -614,13 +590,7 @@ def parse_tool_output(execution_json):
     execution_json["configuration"] = tool.config_from_id(execution_json["configuration-id"])
     tool.parse_logfile(log, execution_json)
 
-    # modify logfile
-    NOTES_HEADING = "\n" + "#"*30 + " Notes " + "#"*30 + "\n"
-    posEnd = log.find(NOTES_HEADING)
-    if posEnd >= 0: log = log[:posEnd]
-    if len(execution_json["notes"]) > 0: log += NOTES_HEADING + "\n".join(execution_json["notes"]) + "\n"
-    with open(execution_json["log"], 'w') as logfile:
-        logfile.write(log)
+    # Notes are exported in parsed metadata; keep the measured source log intact.
 
 # stores benchmark-instance specific data from the execution. Reports inconsistencies with other executions on the same instance
 def process_benchmark_instance_data(benchmark_instances, execution_json):
@@ -678,15 +648,19 @@ def gather_execution_data(logdirs, silent=False):
         print("\nGathering execution data for logfiles in {} ...".format(logdir))
         json_files = [ f for f in os.listdir(logdir) if f.endswith(".json") and os.path.isfile(os.path.join(logdir, f)) ]
         ignored_benchmarks = Counter()
+        ignored_configurations = Counter()
         i = 0
         for execution_json in [ load_json(os.path.join(logdir, f)) for f in json_files ]:
             benchmark = execution_json["benchmark-id"]
             if benchmark not in known_benchmark_ids:
                 ignored_benchmarks[benchmark] += 1
                 continue
-            i += 1
             tool = execution_json["tool"]
             config = execution_json["configuration-id"]
+            if config in getattr(TOOL_NAMES.get(tool), "RETIRED_CONFIG_IDS", ()):
+                ignored_configurations[config] += 1
+                continue
+            i += 1
             exec_data.setdefault(tool, OrderedDict())
             exec_data[tool].setdefault(config, OrderedDict())
             assert benchmark not in exec_data[tool][config], "Error: Multiple result files found for {}.{}.{}".format(tool,config,benchmark)
@@ -704,6 +678,8 @@ def gather_execution_data(logdirs, silent=False):
 
         for benchmark, count in sorted(ignored_benchmarks.items()):
             print(f"WARN: Ignoring {count} result file(s) for removed benchmark {benchmark}")
+        for config, count in sorted(ignored_configurations.items()):
+            print(f"Ignoring {count} archived result file(s) for retired configuration {config}")
 
     # warn for missing configs:
     if not silent:
@@ -717,13 +693,14 @@ def gather_execution_data(logdirs, silent=False):
 def process_meta_configs(exec_data, benchmark_instances):
     # gather data for meta-configurations
     for tool in exec_data:
+        active_config_ids = {cfg["id"] for cfg in TOOL_NAMES[tool].CONFIGS}
         for metacfg in TOOL_NAMES[tool].META_CONFIGS:
             benchmark_data = OrderedDict()
             for benchmark in benchmark_instances:
                 best_cfg_id = None
                 expected_relation = expected_bound_relation(metacfg["cfgbase"], benchmarks.from_id(benchmark))
                 for cfg_id in exec_data[tool]:
-                    if cfg_id in [c["id"] for c in TOOL_NAMES[tool].META_CONFIGS]: continue
+                    if cfg_id not in active_config_ids: continue
                     if not cfg_id.startswith(metacfg["cfgbase"]): continue
                     if benchmark not in  exec_data[tool][cfg_id]: continue
                     data = exec_data[tool][cfg_id][benchmark]
@@ -829,10 +806,9 @@ def latex_configuration_parameter(cfgbase, cfg_id):
             threshold = r"\mathrm{def.}" if match.group(1) == "00" else f"2^{{{int(match.group(1))}}}"
             return fr"$\sizethreshold{{=}}{threshold},\resolution{{=}}{int(match.group(2))}$"
     elif cfgbase == "discr":
-        match = re.fullmatch(r"discr(\d{3})([sd])", cfg_id)
+        match = re.fullmatch(r"discr(\d{3})s", cfg_id)
         if match is not None:
-            mode = r"\mathrm{static}" if match.group(2) == "s" else r"\mathrm{dyn.}"
-            return fr"$\resolution{{=}}{int(match.group(1))},\ {mode}$"
+            return fr"$\resolution{{=}}{int(match.group(1))}$"
     return cfg_id.replace("_", r"\_")
 
 def unavailable_result_cell(exec_data, config_ids, inst_id):
@@ -954,7 +930,9 @@ def finite_belief_mdp_models(exec_data, benchmark_instances):
                 break
     return finite_models
 
-def save_dissertation_tables(exec_data, benchmark_instances, timelimit=1800):
+def save_dissertation_tables(exec_data, benchmark_instances, timelimit=None):
+    if timelimit is None:
+        timelimit = storm.META_CONFIG_TIMELIMITS[0]
     model_column = fixed_latex_column("center", "16mm")
     objective_column = fixed_latex_column("center", "10mm")
     result_column = fixed_latex_column("right", "21.5mm")
@@ -1142,34 +1120,14 @@ def fastest_discretisation_matching_mdp(exec_data, inst_id, config_ids, directio
 def save_overapproximation_table(exec_data, benchmark_instances):
     summary_model_column = fixed_latex_column("center", "20mm")
     summary_objective_column = fixed_latex_column("center", "12mm")
-    resolution_model_column = fixed_latex_column("center", "14mm")
-    resolution_objective_column = fixed_latex_column("center", "9mm")
     summary_result_column = fixed_latex_column("right", "26.9mm")
-    resolution_result_column = fixed_latex_column("right", "15mm")
-    shown_resolutions = [2, 5, 12]
-    all_discretization_ids = [
-        f"discr{resolution:03}{mode}"
-        for resolution in range(2, 13) for mode in ["s", "d"]
-    ]
+    all_discretization_ids = [cfg["id"] for cfg in storm.CONFIGS
+                              if cfg.get("family") == "discretisation"]
     summary_header = "\n& ".join([
         "Model", "Obj.", r"\config{mdp}",
         r"\config{discr} -- Fastest Matching",
         r"\config{discr} -- Tightest",
     ])
-    resolution_first_header = "\n& ".join(
-        [r"\multirow{2}{*}{Model}", r"\multirow{2}{*}{Obj.}"] +
-        [rf"\multicolumn{{2}}{{c{'|' if index < len(shown_resolutions) - 1 else ''}}}"
-         rf"{{$\resolution={resolution}$}}"
-         for index, resolution in enumerate(shown_resolutions)]
-    )
-    resolution_second_header = "\n& ".join(
-        ["", ""] +
-        [mode for _ in shown_resolutions for mode in ["static", "dynamic"]]
-    )
-    resolution_header = (
-        resolution_first_header + r"\\" + "\n" + resolution_second_header
-    )
-
     objective_tables = [
         ("prb", "min", "tableoverapproxprbmin.tex"),
         ("prb", "max", "tableoverapproxprbmax.tex"),
@@ -1178,7 +1136,6 @@ def save_overapproximation_table(exec_data, benchmark_instances):
     ]
     for property_type, direction, filename in objective_tables:
         summary_rows = [[]]
-        resolution_rows = [[]]
         for benchmark in benchmarks.INSTANCES:
             if (benchmark["property"]["type"] != property_type or
                     benchmark["property"]["dir"] != direction):
@@ -1218,32 +1175,13 @@ def save_overapproximation_table(exec_data, benchmark_instances):
                 selected_cell(fastest_id),
                 selected_cell(best_discretization_id),
             ])
-            resolution_cells = []
-            for resolution in shown_resolutions:
-                for mode in ["s", "d"]:
-                    cell = dissertation_value_cell(
-                        exec_data, inst_id, f"discr{resolution:03}{mode}",
-                    )
-                    resolution_cells.append(cell)
-            resolution_rows.append([
-                dissertation_model(instance),
-                dissertation_property(instance),
-                *resolution_cells,
-            ])
         summary_column_spec = (
             rf"{summary_model_column}@{{\hspace{{0.5pt}}}}{summary_objective_column}"
             + f" | {summary_result_column}" * 3
         )
-        resolution_column_spec = (
-            rf"{resolution_model_column}@{{\hspace{{0.5pt}}}}{resolution_objective_column}"
-            + f" | {resolution_result_column} {resolution_result_column}"  * 3
-        )
         save_latex(summary_rows, summary_column_spec, summary_header,
                    os.path.join(OVERAPPROX_TABLE_DIR, filename), grid=True,
                    tabcolsep="1pt", alternating_rows=True, arraystretch="0.95")
-        save_latex(resolution_rows, resolution_column_spec, resolution_header,
-                   os.path.join(OVERAPPROX_TABLE_DIR, filename.replace("tableoverapprox", "tableoverapproxresolution")),
-                   grid=True, tabcolsep="1pt", alternating_rows=True)
 
 
 def underapproximation_summary_cell(exec_data, inst_id, config_id):
@@ -1367,750 +1305,6 @@ def save_underapproximation_tables(
         )
 
 
-def time_result_plot_series(exec_data, inst_id, cfgbase, start_time=0.01, end_time=3600):
-    benchmark = benchmarks.from_id(inst_id)
-    expected_relation = expected_bound_relation(cfgbase, benchmark)
-    increasing = expected_relation == "≥"
-    data = []
-    for config in storm.CONFIGS:
-        if not config["id"].startswith(cfgbase):
-            continue
-        result = get_result(exec_data, storm.NAME, config["id"], inst_id)
-        if not is_successful_result(result):
-            continue
-        relation, value = parse_result_value(result["result"])
-        if relation not in ["=", expected_relation]:
-            raise ValueError(
-                f"Expected a '{expected_relation}' bound, got '{result['result']}' in {result['id']}"
-            )
-        data.append((result["wallclock-time"], value))
-
-    data.sort()
-    if len(data) == 0:
-        return []
-
-    if benchmark["property"]["type"] == "prb":
-        # Probability objectives have a trivial bound that is available before
-        # any configuration finishes.
-        initial_value = 0.0 if increasing else 1.0
-        series = [(start_time, initial_value)]
-        remaining_data = data
-    else:
-        # Do not make the first reward bound appear available before the run
-        # that computed it has finished.
-        first_runtime, first_value = data[0]
-        series = [(first_runtime, first_value)]
-        remaining_data = data[1:]
-
-    for runtime, value in remaining_data:
-        previous_value = series[-1][1]
-        if increasing and previous_value >= value:
-            continue
-        if not increasing and previous_value <= value:
-            continue
-        # Keep the incumbent result until the improving run finishes, then
-        # change vertically to the newly available result.
-        series.append((runtime, previous_value))
-        series.append((runtime, value))
-    series.append((end_time, series[-1][1]))
-    return series
-
-
-def save_time_result_csv(exec_data, benchmark_instances):
-    header = []
-    series_contents = []
-    for cfgbase in ["cut", "clip", "discr"]:
-        for benchmark in benchmarks.INSTANCES:
-            inst_id = benchmark["id"]
-            if inst_id not in benchmark_instances:
-                continue
-            series_name = f"{cfgbase}.{inst_id}"
-            header.extend([f"{series_name}.time", f"{series_name}.result"])
-            series_contents.append(time_result_plot_series(exec_data, inst_id, cfgbase))
-
-    table = [header]
-    num_rows = max((len(series) for series in series_contents), default=0)
-    for row_index in range(num_rows):
-        row = []
-        for series in series_contents:
-            row.extend(series[row_index] if row_index < len(series) else ["", ""])
-        table.append(row)
-    save_csv(table, os.path.join(OUT_DIR, "time_result.csv"))
-
-    os.makedirs(TIME_RESULT_PLOT_DIR, exist_ok=True)
-    preview_inputs = []
-    for benchmark in benchmarks.INSTANCES:
-        inst_id = benchmark["id"]
-        if inst_id not in benchmark_instances:
-            continue
-        plot = ["% Generated by scripts/postprocess.py.\n", LATEX_PLOT_BEGIN,
-                r"\begin{tikzpicture}" + "\n" + r"\begin{axis}[" + "\n",
-                LATEX_INSTANCE_PLOT_OPTIONS,
-                r"unbounded coords=discard,xmin=0.01,xmax=3600,xmode=log," + "\n"]
-        if benchmark["property"]["type"] == "prb":
-            plot.append("ymin=0,ymax=1.04,\n")
-        plot.extend([
-            r"xlabel=time (seconds),ylabel=value bounds," + "\n",
-            r"title={\texttt{\detokenize{" + inst_id + r"}}},title style={font=\tiny,yshift=24pt}," + "\n",
-            r"log ticks with fixed point,scaled x ticks=false," + "\n", "]\n",
-        ])
-        for cfgbase, style in [
-            ("cut", "plotcut,mark=o"),
-            ("clip", "plotclip,mark=star"),
-            ("discr", "plotdiscr,mark=triangle"),
-        ]:
-            series = time_result_plot_series(exec_data, inst_id, cfgbase)
-            coordinates = " ".join(f"({runtime},{value})" for runtime, value in series)
-            plot.append(r"\addplot[" + style + r",mark repeat=2,mark phase=2] coordinates {" + coordinates + "};\n")
-        plot.extend([r"\legend{\config{cut},\config{clip},\config{discr}}" + "\n",
-                     LATEX_INSTANCE_PLOT_END, "\\endgroup\n"])
-        filename = f"time_result-{inst_id}.tex"
-        with open(os.path.join(TIME_RESULT_PLOT_DIR, filename), "w") as plot_file:
-            plot_file.write("".join(plot))
-        preview_inputs.append(f"\\input{{general-plots/time-result/{filename}}}\n")
-    with open(os.path.join(TIME_RESULT_PLOT_DIR, "time_result_preview.tex"), "w") as preview:
-        preview.write("% Preview index: each plot is stored in a separate file.\n")
-        preview.writelines(preview_inputs)
-
-
-def save_time_budget_improvement_csv(
-    exec_data,
-    benchmark_instances,
-    accounting="incremental",
-    start_time=0.01,
-    end_time=3600,
-):
-    """Export how many instances match or tighten their MDP bound over time.
-
-    A discretisation result is available after both it and the MDP baseline
-    have completed. With sequential accounting their wall-clock times are
-    added; ``incremental`` counts only the extra discretisation time, while
-    ``parallel`` takes their maximum.
-
-    Values are compared at precision 10^-6, matching the generated
-    dissertation tables. Each event is emitted twice (before and after the
-    update), so an ordinary PGFPlots line produces an exact step curve.
-    """
-    if accounting not in ["incremental", "parallel", "sequential"]:
-        raise ValueError(f"Unknown time-budget accounting mode: {accounting}")
-
-    def reported_value(result):
-        _, value = parse_result_value(result["result"])
-        return comparison_value(value)
-
-    def completion_time(discretisation, mdp):
-        discretisation_time = discretisation["wallclock-time"]
-        mdp_time = mdp["wallclock-time"]
-        if accounting == "incremental":
-            return discretisation_time
-        if accounting == "parallel":
-            return max(discretisation_time, mdp_time)
-        return discretisation_time + mdp_time
-
-    discretisation_ids = [
-        config["id"]
-        for config in storm.CONFIGS
-        if config.get("family") == "discretisation"
-    ]
-    runs = OrderedDict()
-    event_times = set()
-
-    for benchmark in benchmarks.INSTANCES:
-        inst_id = benchmark["id"]
-        if inst_id not in benchmark_instances:
-            continue
-        mdp = get_result(exec_data, storm.NAME, "mdp", inst_id)
-        if not is_successful_result(mdp):
-            continue
-
-        instance_runs = []
-        for config_id in discretisation_ids:
-            result = get_result(exec_data, storm.NAME, config_id, inst_id)
-            if not is_successful_result(result):
-                continue
-            runtime = completion_time(result, mdp)
-            instance_runs.append((runtime, reported_value(result)))
-            event_times.add(runtime)
-        runs[inst_id] = instance_runs
-
-    def counts_at(budget):
-        available = 0
-        at_least_as_tight = 0
-        strictly_tighter = 0
-        for inst_id, instance_runs in runs.items():
-            completed_values = [
-                value for runtime, value in instance_runs if runtime <= budget
-            ]
-            if len(completed_values) == 0:
-                continue
-            available += 1
-
-            benchmark = benchmarks.from_id(inst_id)
-            mdp = get_result(exec_data, storm.NAME, "mdp", inst_id)
-            mdp_value = reported_value(mdp)
-            if benchmark["property"]["dir"] == "max":
-                at_least_as_tight += min(completed_values) <= mdp_value
-                strictly_tighter += min(completed_values) < mdp_value
-            else:
-                at_least_as_tight += max(completed_values) >= mdp_value
-                strictly_tighter += max(completed_values) > mdp_value
-        return available, at_least_as_tight, strictly_tighter
-
-    total = len(runs)
-    header = [
-        "time",
-        "available",
-        "at-least-as-tight",
-        "strictly-tighter",
-    ]
-    table = [header]
-
-    def append_row(runtime, available, at_least_as_tight, strictly_tighter):
-        table.append([
-            runtime,
-            available,
-            at_least_as_tight,
-            strictly_tighter,
-        ])
-
-    previous_available = 0
-    previous_at_least_as_tight = 0
-    previous_strictly_tighter = 0
-    append_row(start_time, previous_available, previous_at_least_as_tight, previous_strictly_tighter)
-    for runtime in sorted(event_times):
-        append_row(runtime, previous_available, previous_at_least_as_tight, previous_strictly_tighter)
-        previous_available, previous_at_least_as_tight, previous_strictly_tighter = counts_at(runtime)
-        append_row(runtime, previous_available, previous_at_least_as_tight, previous_strictly_tighter)
-    append_row(
-        max(end_time, max(event_times, default=end_time)),
-        previous_available,
-        previous_at_least_as_tight,
-        previous_strictly_tighter,
-    )
-
-    save_csv(
-        table,
-        os.path.join(OUT_DIR, f"time_budget_improvement_{accounting}.csv"),
-    )
-
-    accounting_label = {
-        "incremental": "Discretisation time budget (seconds)",
-        "parallel": "Parallel time budget (seconds)",
-        "sequential": "Sequential time budget (seconds)",
-    }[accounting]
-    plot = r"""% Generated by scripts/postprocess.py.
-\begin{tikzpicture}
-\begin{axis}[
-    width=\dimexpr\linewidth-6mm\relax,
-    height=4.5cm,
-    xmode=log,
-    xmin=0.01,
-    xmax=3600,
-    ymin=0,
-    ymax=@TOTAL@,
-    ytick={0,5,10,15,20,25,30,35,@TOTAL@},
-    xlabel={@ACCOUNTING_LABEL@},
-    ylabel={Benchmark instances},
-    log ticks with fixed point,
-    scaled x ticks=false,
-    every axis plot/.append style={thick,no marks},
-]
-\addplot[color=RWTHblue]
-table[
-    x=time,
-    y=at-least-as-tight,
-    col sep=tab,
-] {@CSV_FILE@};
-\addlegendentry{At least as tight as MDP}
-\addplot[color=RWTHbordeaux,dashed]
-table[x=time,y=strictly-tighter,col sep=tab]{@CSV_FILE@};
-\addlegendentry{Strictly tighter}
-\end{axis}
-\end{tikzpicture}
-"""
-    plot = plot.replace("@ACCOUNTING_LABEL@", accounting_label)
-    plot = plot.replace("@CSV_FILE@", f"time_budget_improvement_{accounting}.csv")
-    plot = plot.replace("@TOTAL@", str(total))
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-    with open(os.path.join(GENERAL_PLOT_DIR, "time_budget_improvement_plot.tex"), "w") as plot_file:
-        plot_file.write(embed_plot_data(plot, {f"time_budget_improvement_{accounting}.csv": table}))
-
-
-def save_resolution_result_csv(exec_data, benchmark_instances):
-    """Export discretisation bounds by resolution for static and dynamic mode."""
-    modes = [("s", "static"), ("d", "dynamic")]
-    included_benchmarks = [
-        benchmark for benchmark in benchmarks.INSTANCES
-        if benchmark["id"] in benchmark_instances
-    ]
-    header = ["resolution"]
-    for benchmark in included_benchmarks:
-        inst_id = benchmark["id"]
-        for _, mode_name in modes:
-            header.extend([
-                f"{mode_name}.{inst_id}.result",
-                f"{mode_name}.{inst_id}.time",
-                f"{mode_name}.{inst_id}.states",
-            ])
-        header.extend([f"mdp.{inst_id}.result", f"mdp.{inst_id}.time"])
-
-    table = [header]
-    for resolution in range(2, 13):
-        row = [resolution]
-        for benchmark in included_benchmarks:
-            inst_id = benchmark["id"]
-            expected_relation = expected_bound_relation("discr", benchmark)
-            for mode_id, _ in modes:
-                result = get_result(
-                    exec_data, storm.NAME, f"discr{resolution:03}{mode_id}", inst_id
-                )
-                if not is_successful_result(result):
-                    row.extend(["nan", "nan", "nan"])
-                    continue
-                relation, value = parse_result_value(result["result"])
-                if relation not in ["=", expected_relation]:
-                    raise ValueError(
-                        f"Expected a '{expected_relation}' bound, got "
-                        f"'{result['result']}' in {result['id']}"
-                    )
-                states = result.get("belief-mdp", {}).get("states", "nan")
-                row.extend([value, result["wallclock-time"], states])
-            mdp = get_result(exec_data, storm.NAME, "mdp", inst_id)
-            row.extend([
-                parse_result_value(mdp["result"])[1] if is_successful_result(mdp) else "nan",
-                mdp["wallclock-time"] if is_successful_result(mdp) else "nan",
-            ])
-        table.append(row)
-    save_csv(table, os.path.join(OUT_DIR, "resolution_result.csv"))
-
-    save_resolution_instance_plots(table, included_benchmarks)
-
-
-def save_resolution_instance_plots(table, included_benchmarks):
-    """Write one self-contained value and runtime plot per benchmark."""
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-    header = table[0]
-    for metric, filename_metric, preview_filename in [
-        ("result", "value", "resolution_value_preview.tex"),
-        ("time", "time", "resolution_time_preview.tex"),
-    ]:
-        plot_dir = RESOLUTION_TIME_PLOT_DIR if metric == "time" else RESOLUTION_VALUE_PLOT_DIR
-        os.makedirs(plot_dir, exist_ok=True)
-        preview_inputs = ["% Preview index: each plot is stored in a separate file.\n"]
-        for plot_index, benchmark in enumerate(included_benchmarks):
-            inst_id = benchmark["id"]
-            plot = [
-                "% Generated by scripts/postprocess.py. Requires pgfplots (compat=1.18).\n",
-                LATEX_PLOT_BEGIN,
-                r"\begin{tikzpicture}" + "\n" + r"\begin{axis}[" + "\n",
-                "width=7cm,height=4.5cm,\n" + LATEX_PLOT_OPTIONS,
-                r"xmin=2,xmax=12,xtick={2,4,6,8,10,12},unbounded coords=jump," + "\n",
-                r"xlabel=resolution $\eta$," + "\n",
-                r"title={\texttt{\detokenize{" + inst_id + r"}}},title style={font=\tiny,yshift=24pt}," + "\n",
-            ]
-            if metric == "time":
-                plot.append(r"ylabel={time (seconds)},ymode=log,log ticks with fixed point,scaled y ticks=false," + "\n")
-            else:
-                plot.append(r"ylabel={value bounds},enlarge y limits=0.08,scaled y ticks=false," + "\n")
-                plot.append(r"yticklabel style={font=\small,/pgf/number format/fixed relative,/pgf/number format/precision=5}," + "\n")
-            plot.append("]\n")
-            for mode, style, label in [
-                ("static", "plotdiscr,mark=o", "static"),
-                ("dynamic", "plotclip,mark=triangle", "dynamic"),
-                ("mdp", "black!60,dashed,no marks", r"\config{mdp}"),
-            ]:
-                value_index = header.index(f"{mode}.{inst_id}.{metric}")
-                series_table = [["resolution", metric]] + [[row[0], row[value_index]] for row in table[1:]]
-                plot.append(r"\addplot[" + style + r"] table[x=resolution,y=" + metric + r",col sep=space,row sep=\\]{" + latex_plot_table(series_table) + "};\n")
-                plot.append(r"\addlegendentry{" + label + "}\n")
-            plot.extend([LATEX_INSTANCE_PLOT_END, "\\endgroup\n"])
-            contents = "".join(plot)
-            filename = f"resolution_{filename_metric}-{inst_id}.tex"
-            with open(os.path.join(plot_dir, filename), "w") as plot_file:
-                plot_file.write(contents)
-            folder = "resolution-time" if metric == "time" else "resolution-value"
-            preview_inputs.append(f"\\input{{general-plots/{folder}/{filename}}}\n")
-        with open(os.path.join(plot_dir, preview_filename), "w") as preview:
-            preview.writelines(preview_inputs)
-
-
-def save_resolution_overview_csv(exec_data, benchmark_instances):
-    """Compare discretisation resolutions using only the MDP as baseline."""
-    modes = [("s", "static"), ("d", "dynamic")]
-
-    def reported_value(result):
-        value = parse_result_value(result["result"])[1]
-        return comparison_value(value)
-
-    def directional_gain(direction, baseline, candidate):
-        return baseline - candidate if direction == "max" else candidate - baseline
-
-    def quantile(values, probability):
-        values = sorted(values)
-        if len(values) == 0:
-            return "nan"
-        position = probability * (len(values) - 1)
-        lower_index, upper_index = math.floor(position), math.ceil(position)
-        if lower_index == upper_index:
-            return values[lower_index]
-        fraction = position - lower_index
-        return values[lower_index] * (1 - fraction) + values[upper_index] * fraction
-
-    instances = OrderedDict()
-    for benchmark in benchmarks.INSTANCES:
-        inst_id = benchmark["id"]
-        if inst_id not in benchmark_instances:
-            continue
-        mdp = get_result(exec_data, storm.NAME, "mdp", inst_id)
-        if not is_successful_result(mdp):
-            continue
-        direction = benchmark["property"]["dir"]
-        mdp_value = reported_value(mdp)
-        observed_values = []
-        for resolution in range(2, 13):
-            for mode_id, _ in modes:
-                result = get_result(
-                    exec_data, storm.NAME, f"discr{resolution:03}{mode_id}", inst_id
-                )
-                if is_successful_result(result):
-                    observed_values.append(reported_value(result))
-        best_value = (min if direction == "max" else max)(observed_values, default=mdp_value)
-        best_gain = directional_gain(direction, mdp_value, best_value)
-        instances[inst_id] = (direction, mdp_value, best_gain)
-
-    progress_header = ["resolution"]
-    for _, mode_name in modes:
-        progress_header.extend([
-            f"{mode_name}-q25",
-            f"{mode_name}-median",
-            f"{mode_name}-q75",
-            f"{mode_name}-median-time",
-        ])
-    progress_table = [progress_header]
-    outcomes_table = [[
-        "plot-x", "resolution", "mode", "strict", "tie", "unavailable", "worse"
-    ]]
-    cumulative_table = [["resolution", "static", "dynamic"]]
-    interval_header = ["plot-x", "resolution", "minimum", "q25", "median", "q75",
-                       "maximum", "successful", "failed", "not-run"]
-    interval_tables = {mode_name: [interval_header] for _, mode_name in modes}
-    coverage_table = [["plot-x", "resolution", "mode", "successful", "failed", "not-run"]]
-    first_improving_resolution = {mode_name: {} for _, mode_name in modes}
-
-    for resolution in range(2, 13):
-        progress_row = [resolution]
-        for mode_index, (mode_id, mode_name) in enumerate(modes):
-            progress = []
-            runtimes = []
-            counts = Counter()
-            iqr_counts = Counter()
-            for inst_id, (direction, mdp_value, best_gain) in instances.items():
-                result = get_result(
-                    exec_data, storm.NAME, f"discr{resolution:03}{mode_id}", inst_id
-                )
-                if not is_successful_result(result):
-                    counts["unavailable"] += 1
-                    if best_gain > 0:
-                        iqr_counts["not-run" if result is None else "failed"] += 1
-                    continue
-                runtimes.append(result["wallclock-time"])
-                candidate = reported_value(result)
-                gain = directional_gain(direction, mdp_value, candidate)
-                if gain > 0:
-                    counts["strict"] += 1
-                    first_improving_resolution[mode_name].setdefault(inst_id, resolution)
-                elif gain == 0:
-                    counts["tie"] += 1
-                else:
-                    counts["worse"] += 1
-                if best_gain > 0:
-                    iqr_counts["successful"] += 1
-                    progress.append(max(0, min(100, 100 * gain / best_gain)))
-
-            progress_row.extend([
-                quantile(progress, 0.25),
-                quantile(progress, 0.5),
-                quantile(progress, 0.75),
-                quantile(runtimes, 0.5),
-            ])
-            plot_x = resolution + (-0.18 if mode_index == 0 else 0.18)
-            q25, median, q75 = [quantile(progress, fraction) for fraction in (0.25, 0.5, 0.75)]
-            interval_tables[mode_name].append([
-                plot_x, resolution, min(progress, default="nan"), q25, median, q75,
-                max(progress, default="nan"),
-                iqr_counts["successful"], iqr_counts["failed"], iqr_counts["not-run"],
-            ])
-            coverage_table.append([
-                plot_x, resolution, mode_name,
-                iqr_counts["successful"], iqr_counts["failed"], iqr_counts["not-run"],
-            ])
-            outcomes_table.append([
-                plot_x, resolution, mode_name, counts["strict"], counts["tie"],
-                counts["unavailable"], counts["worse"],
-            ])
-        progress_table.append(progress_row)
-        cumulative_table.append([
-            resolution,
-            sum(value <= resolution for value in first_improving_resolution["static"].values()),
-            sum(value <= resolution for value in first_improving_resolution["dynamic"].values()),
-        ])
-
-    save_csv(progress_table, os.path.join(OUT_DIR, "resolution_progress.csv"))
-    save_csv(outcomes_table, os.path.join(OUT_DIR, "resolution_outcomes.csv"))
-    save_csv(cumulative_table, os.path.join(OUT_DIR, "minimum_improving_resolution.csv"))
-
-    for mode_name, table in interval_tables.items():
-        save_csv(table, os.path.join(OUT_DIR, f"resolution_iqr_{mode_name}.csv"))
-    save_csv(coverage_table, os.path.join(OUT_DIR, "resolution_iqr_coverage.csv"))
-
-    total = len(instances)
-    boxplots = []
-    for mode_name, color in [("static", "RWTHblue"), ("dynamic", "RWTHbordeaux")]:
-        for row in interval_tables[mode_name][1:]:
-            x, _, minimum, q25, median, q75, maximum, successful, _, _ = row
-            if not successful:
-                continue
-            boxplots.append(
-                r"\addplot[draw=" + color + ",fill=" + color + r"!20,forget plot,"
-                + r"boxplot/draw direction=y,boxplot/box extend=0.24,boxplot prepared={"
-                + f"draw position={x},lower whisker={minimum},lower quartile={q25},"
-                + f"median={median},upper quartile={q75},upper whisker={maximum}"
-                + r"}] coordinates {};" + "\n"
-            )
-        boxplots.append(r"\addlegendimage{area legend,draw=" + color + ",fill=" + color + "!20}\n")
-        boxplots.append(r"\addlegendentry{" + mode_name + "}\n")
-
-    overview_plot = r"""% Generated by scripts/postprocess.py.
-% Preamble also requires \usepgfplotslibrary{statistics}.
-\begin{tikzpicture}
-\begin{axis}[width=\dimexpr\linewidth-6mm\relax,height=4.5cm,
-xmin=1.5,xmax=12.5,xtick={2,3,4,5,6,7,8,9,10,11,12},
-ymin=-3,ymax=105,ytick={0,25,50,75,100},ylabel={Improvement reached (\%)},
-xlabel={resolution $\eta$ (left: static; right: dynamic)},legend columns=2]
-@BOXPLOTS@
-\end{axis}
-\end{tikzpicture}
-"""
-    overview_plot = overview_plot.replace("@BOXPLOTS@", "".join(boxplots))
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-    with open(os.path.join(GENERAL_PLOT_DIR, "resolution_overview_plot.tex"), "w") as plot_file:
-        plot_file.write(style_latex_plot(overview_plot))
-
-    cumulative_plot = r"""% Generated by scripts/postprocess.py.
-\begin{tikzpicture}
-\begin{axis}[
-width=\dimexpr\linewidth-6mm\relax,height=4.5cm,xmin=2,xmax=12,ymin=0,ymax=@TOTAL@,
-xtick={2,3,4,5,6,7,8,9,10,11,12},ytick={0,10,20,30,@TOTAL@},
-xlabel={resolution threshold $\eta$},ylabel={Improving benchmarks},
-legend columns=2]
-\addplot[RWTHblue,thick,mark=o] table[x=resolution,y=static,col sep=tab]{minimum_improving_resolution.csv};
-\addlegendentry{static}
-\addplot[RWTHbordeaux,thick,mark=triangle] table[x=resolution,y=dynamic,col sep=tab]{minimum_improving_resolution.csv};
-\addlegendentry{dynamic}
-\end{axis}
-\end{tikzpicture}
-""".replace("@TOTAL@", str(total))
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-    with open(os.path.join(GENERAL_PLOT_DIR, "minimum_improving_resolution_plot.tex"), "w") as plot_file:
-        plot_file.write(embed_plot_data(cumulative_plot, {"minimum_improving_resolution.csv": cumulative_table}))
-
-
-def save_discretisation_mode_comparison_csv(
-    exec_data,
-    benchmark_instances,
-    runtime_tolerance=0.05,
-):
-    """Classify the static/dynamic quality-runtime tradeoff by resolution."""
-    if not 0 <= runtime_tolerance < 1:
-        raise ValueError("runtime_tolerance must lie in [0, 1)")
-
-    def reported_value(result):
-        value = parse_result_value(result["result"])[1]
-        return comparison_value(value)
-
-    included_benchmarks = [
-        benchmark for benchmark in benchmarks.INSTANCES
-        if benchmark["id"] in benchmark_instances
-    ]
-    header = [
-        "resolution",
-        "dynamic-better",
-        "static-better",
-        "equal-result",
-        "dynamic-faster",
-        "static-faster",
-        "similar-runtime",
-        "dynamic-dominates",
-        "static-dominates",
-        "tradeoff",
-        "equivalent",
-        "unavailable",
-        "dynamic-better-and-faster",
-        "static-better-and-faster",
-    ]
-    table = [header]
-    paired_bar_table = [[
-        "plot-x", "resolution", "metric",
-        "dynamic", "static", "equal-or-similar", "unavailable",
-    ]]
-
-    for resolution in range(2, 13):
-        counts = Counter()
-        for benchmark in included_benchmarks:
-            inst_id = benchmark["id"]
-            static = get_result(
-                exec_data, storm.NAME, f"discr{resolution:03}s", inst_id
-            )
-            dynamic = get_result(
-                exec_data, storm.NAME, f"discr{resolution:03}d", inst_id
-            )
-            if not is_successful_result(static) or not is_successful_result(dynamic):
-                counts["unavailable"] += 1
-                continue
-
-            static_value = reported_value(static)
-            dynamic_value = reported_value(dynamic)
-            direction = benchmark["property"]["dir"]
-            if static_value == dynamic_value:
-                quality = "equivalent"
-            elif ((direction == "max" and dynamic_value < static_value)
-                  or (direction == "min" and dynamic_value > static_value)):
-                quality = "dynamic"
-            else:
-                quality = "static"
-            counts[f"quality-{quality}"] += 1
-
-            static_time = static["wallclock-time"]
-            dynamic_time = dynamic["wallclock-time"]
-            if dynamic_time < (1 - runtime_tolerance) * static_time:
-                speed = "dynamic"
-            elif static_time < (1 - runtime_tolerance) * dynamic_time:
-                speed = "static"
-            else:
-                speed = "equivalent"
-            counts[f"speed-{speed}"] += 1
-
-            if quality == "dynamic" and speed == "dynamic":
-                counts["dynamic-better-and-faster"] += 1
-            elif quality == "static" and speed == "static":
-                counts["static-better-and-faster"] += 1
-
-            if (quality in ["dynamic", "equivalent"]
-                    and speed in ["dynamic", "equivalent"]
-                    and (quality == "dynamic" or speed == "dynamic")):
-                counts["dynamic-dominates"] += 1
-            elif (quality in ["static", "equivalent"]
-                    and speed in ["static", "equivalent"]
-                    and (quality == "static" or speed == "static")):
-                counts["static-dominates"] += 1
-            elif quality == "equivalent" and speed == "equivalent":
-                counts["equivalent"] += 1
-            else:
-                counts["tradeoff"] += 1
-
-        table.append([
-            resolution,
-            counts["quality-dynamic"],
-            counts["quality-static"],
-            counts["quality-equivalent"],
-            counts["speed-dynamic"],
-            counts["speed-static"],
-            counts["speed-equivalent"],
-            counts["dynamic-dominates"],
-            counts["static-dominates"],
-            counts["tradeoff"],
-            counts["equivalent"],
-            counts["unavailable"],
-            counts["dynamic-better-and-faster"],
-            counts["static-better-and-faster"],
-        ])
-        paired_bar_table.extend([
-            [resolution - 0.19, resolution, "bound",
-             counts["quality-dynamic"], counts["quality-static"],
-             counts["quality-equivalent"], counts["unavailable"]],
-            [resolution + 0.19, resolution, "runtime",
-             counts["speed-dynamic"], counts["speed-static"],
-             counts["speed-equivalent"], counts["unavailable"]],
-        ])
-
-    save_csv(table, os.path.join(OUT_DIR, "discretisation_mode_comparison.csv"))
-    save_csv(
-        paired_bar_table,
-        os.path.join(OUT_DIR, "discretisation_mode_comparison_bars.csv"),
-    )
-
-    total = len(included_benchmarks)
-    plot = r"""% Generated by scripts/postprocess.py.
-\begin{tikzpicture}
-\begin{axis}[
-    width=\dimexpr\linewidth-6mm\relax,
-    height=4.5cm,
-    ybar stacked,
-    bar width=5.5pt,
-    xmin=1.5,
-    xmax=12.5,
-    ymin=0,
-    ymax=@TOTAL@,
-    xtick={2,3,4,5,6,7,8,9,10,11,12},
-    ytick={0,10,20,30,@TOTAL@},
-    xlabel={resolution $\eta$ (left: bound; right: runtime)},
-    ylabel={Benchmark instances},
-    legend columns=2,
-]
-\addplot[fill=RWTHbordeaux,draw=none]
-table[x=plot-x,y=dynamic,col sep=tab]{discretisation_mode_comparison_bars.csv};
-\addlegendentry{dynamic better / faster}
-\addplot[fill=RWTHblue,draw=none]
-table[x=plot-x,y=static,col sep=tab]{discretisation_mode_comparison_bars.csv};
-\addlegendentry{static better / faster}
-\addplot[fill=black!12,draw=none]
-table[x=plot-x,y=equal-or-similar,col sep=tab]{discretisation_mode_comparison_bars.csv};
-\addlegendentry{equal / similar}
-\addplot[fill=black!45,draw=none]
-table[x=plot-x,y=unavailable,col sep=tab]{discretisation_mode_comparison_bars.csv};
-\addlegendentry{no comparison}
-\end{axis}
-\end{tikzpicture}
-"""
-    plot = plot.replace("@TOTAL@", str(total))
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-    with open(os.path.join(GENERAL_PLOT_DIR, "discretisation_mode_comparison_plot.tex"), "w") as plot_file:
-        plot_file.write(embed_plot_data(plot, {"discretisation_mode_comparison_bars.csv": paired_bar_table}))
-
-    tolerance_percent = 100 * runtime_tolerance
-    strict_plot = r"""% Generated by scripts/postprocess.py.
-\begin{tikzpicture}
-\begin{axis}[
-    width=\dimexpr\linewidth-6mm\relax,
-    height=4.5cm,
-    ybar,
-    bar width=8pt,
-    xmin=1.5,
-    xmax=12.5,
-    ymin=0,
-    ymax=12,
-    xtick={2,3,4,5,6,7,8,9,10,11,12},
-    ytick={0,2,4,6,8,10,12},
-    xlabel={resolution $\eta$},
-    ylabel={Benchmark instances},
-    legend columns=2,
-    title={Strict quality--runtime wins (@TOLERANCE@\% runtime tolerance)},
-    title style={font=\small,yshift=30pt},
-]
-\addplot[fill=RWTHbordeaux,draw=none]
-table[x=resolution,y=dynamic-better-and-faster,col sep=tab]{discretisation_mode_comparison.csv};
-\addlegendentry{dynamic tighter and faster}
-\addplot[fill=RWTHblue,draw=none]
-table[x=resolution,y=static-better-and-faster,col sep=tab]{discretisation_mode_comparison.csv};
-\addlegendentry{static tighter and faster}
-\end{axis}
-\end{tikzpicture}
-""".replace("@TOLERANCE@", f"{tolerance_percent:g}")
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-    with open(os.path.join(GENERAL_PLOT_DIR, "discretisation_mode_joint_wins_plot.tex"), "w") as plot_file:
-        plot_file.write(embed_plot_data(strict_plot, {"discretisation_mode_comparison.csv": table}))
-
-
 def plot_quantile(values, probability):
     """Linearly interpolate an empirical quantile, as in the improvement plot."""
     values = sorted(values)
@@ -2132,241 +1326,6 @@ def prepared_boxplot(values, position, color):
         + f"upper quartile={plot_quantile(values, 0.75)},upper whisker={max(values)}"
         + r"}] coordinates {};" + "\n"
     )
-
-
-def save_discretisation_question_plots(exec_data, benchmark_instances, timelimit=1800):
-    """Generate bound, resolution-runtime, and paired mode-runtime comparisons.
-
-    Failed runs are excluded from numeric distributions and reported separately.
-    The bound comparison selects the tightest successful run within timelimit,
-    across both modes and all resolutions, breaking rounded-value ties by time.
-    """
-    included = [b for b in benchmarks.INSTANCES if b["id"] in benchmark_instances]
-    os.makedirs(GENERAL_PLOT_DIR, exist_ok=True)
-
-    def write_plot(filename, plot):
-        path = os.path.join(GENERAL_PLOT_DIR, filename)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as plot_file:
-            plot_file.write(style_latex_plot(plot))
-
-    def axis_plot(options, body):
-        return ("% Generated by scripts/postprocess.py.\n"
-                + r"\begin{tikzpicture}\begin{axis}[" + LATEX_SCATTER_OPTIONS
-                + options + "]\n" + body + r"\end{axis}\end{tikzpicture}" + "\n")
-
-    def legend_plot(entries, columns=2):
-        body = [r"\begin{tikzpicture}\begin{axis}[hide axis,scale only axis,width=0pt,height=0pt,xmin=0,xmax=1,ymin=0,ymax=1,"
-                + f"legend columns={columns},legend style={{draw=black,at={{(0,0)}},anchor=center}}]" + "\n"]
-        for image_options, label in entries:
-            body.append(r"\addlegendimage{" + image_options + "}\n"
-                        + r"\addlegendentry{" + label + "}\n")
-        body.append(r"\end{axis}\end{tikzpicture}" + "\n")
-        return "".join(body)
-
-    def scatter(table, color, mark="o"):
-        return (r"\addplot[only marks,color=" + color + ",mark=" + mark
-                + r",mark options={fill=none},mark size=1.5pt,line width=0.4pt] table[x=x,y=y,col sep=space,row sep=\\]{"
-                + latex_plot_table(table) + "};\n")
-
-    bound_data = [["instance", "objective", "mdp", "discretisation", "configuration", "time", "status"]]
-    bound_preview = ["% Preview index: separate panel and legend files.\n",
-                     "\\input{general-plots/mdp-discretisation/legend.tex}\\par\\medskip\n"]
-    for property_type, title in [("prb", "Probability"), ("rew", "Reward")]:
-        points = {direction: [["x", "y"]] for direction in ("min", "max")}
-        for direction in ("min", "max"):
-            group = [b for b in included if b["property"]["type"] == property_type
-                     and b["property"]["dir"] == direction]
-            for benchmark in group:
-                inst_id = benchmark["id"]
-                mdp = get_result(exec_data, storm.NAME, "mdp", inst_id)
-                candidates = []
-                for resolution in range(2, 13):
-                    for mode in "sd":
-                        config_id = f"discr{resolution:03}{mode}"
-                        result = get_result(exec_data, storm.NAME, config_id, inst_id)
-                        if is_successful_result(result, timelimit):
-                            value = comparison_value(parse_result_value(result["result"])[1])
-                            candidates.append((value if direction == "max" else -value,
-                                               result["wallclock-time"], config_id, result))
-                if not is_successful_result(mdp) or not candidates:
-                    status = "no-baseline" if not is_successful_result(mdp) else "no-result-within-budget"
-                    bound_data.append([inst_id, property_type + direction, "nan", "nan", "none", "nan", status])
-                    continue
-                _, runtime, config_id, result = min(candidates, key=lambda entry: entry[:3])
-                baseline = parse_result_value(mdp["result"])[1]
-                candidate = parse_result_value(result["result"])[1]
-                points[direction].append([baseline, candidate])
-                bound_data.append([inst_id, property_type + direction, baseline, candidate, config_id, runtime, "paired"])
-        count = sum(len(table) - 1 for table in points.values())
-        if property_type == "prb":
-            lower, upper = 0, 1
-            failure, axis_end = scatter_na_limits(lower, upper)
-            ticks = [0, 0.25, 0.5, 0.75, 1, failure]
-            labels = ["0", "0.25", "0.5", "0.75", "1", "n/a"]
-            options = f"xmin=0,xmax={axis_end},ymin=0,ymax={axis_end},"
-            for axis in ("x", "y"):
-                options += axis + "tick={" + ",".join(map(str, ticks)) + "},"
-                options += axis + "ticklabels={" + ",".join(labels) + "},"
-        else:
-            values = [value for table in points.values() for row in table[1:] for value in row]
-            lower = 10 ** math.floor(math.log10(min(values))) if values else 1
-            upper = 10 ** math.ceil(math.log10(max(values))) if values else 10
-            if upper == lower:
-                upper *= 10
-            failure, axis_end = scatter_na_limits(lower, upper, logarithmic=True)
-            options = f"xmode=log,ymode=log,xmin={lower},xmax={axis_end},ymin={lower},ymax={axis_end},"
-            options += scatter_log_ticks(lower, upper, failure)
-        panel = []
-        for separator in [f"({upper},{lower}) ({upper},{axis_end})",
-                          f"({lower},{upper}) ({axis_end},{upper})"]:
-            panel.append(r"\addplot[black!35,thin,no marks,forget plot] coordinates {" + separator + "};\n")
-        panel.append(r"\addplot[black,thin,no marks,forget plot] coordinates {" + f"({lower},{lower}) ({upper},{upper})" + "};\n")
-        if property_type == "rew":
-            for guide in [f"({lower},{2*lower}) ({upper/2},{upper})",
-                          f"({2*lower},{lower}) ({upper},{upper/2})"]:
-                panel.append(r"\addplot[black,densely dotted,thin,no marks,forget plot] coordinates {" + guide + "};\n")
-        min_series = scatter(points["min"], "RWTHblue", "o")
-        max_series = scatter(points["max"], "RWTHbordeaux", "triangle")
-        no_legend = "".join(panel) + min_series + max_series
-        with_legend = ("".join(panel) + min_series + r"\addlegendentry{Minimisation}" + "\n"
-                       + max_series + r"\addlegendentry{Maximisation}" + "\n")
-        # Two 58 mm panels fit the 121.45 mm B5 text block with a 5.45 mm gap.
-        # Absolute sizes avoid being scaled a second time inside a subfigure.
-        axis_options = (r"scale only axis=false,width=58mm,height=58mm,"
-                        + r"xlabel={\config{mdp} bound},ylabel={\config{discr} bound},"
-                        + r"title style={font=\small},scaled ticks=false,"
-                        + f"title={{{title} ($n={count}$)}}," + options)
-        slug = "probability" if property_type == "prb" else "reward"
-        write_plot(f"mdp-discretisation/{slug}.tex", axis_plot(axis_options, with_legend))
-        write_plot(f"mdp-discretisation/{slug}-no-legend.tex", axis_plot(axis_options, no_legend))
-        bound_preview.append("\\begin{minipage}{0.48\\linewidth}\\centering\n"
-                             + f"\\input{{general-plots/mdp-discretisation/{slug}-no-legend.tex}}\n"
-                             + "\\end{minipage}"
-                             + ("\\hfill\n" if property_type == "prb" else "\\par\\medskip\n"))
-    write_plot("mdp-discretisation/legend.tex", legend_plot([
-        ("only marks,color=RWTHblue,mark=o,mark options={fill=none},mark size=1.5pt", "Minimisation"),
-        ("only marks,color=RWTHbordeaux,mark=triangle,mark options={fill=none},mark size=1.5pt", "Maximisation"),
-    ]))
-    with open(os.path.join(GENERAL_PLOT_DIR, "mdp-discretisation", "preview.tex"), "w") as preview:
-        preview.writelines(bound_preview)
-    save_csv(bound_data, os.path.join(OUT_DIR, "mdp_discretisation_bounds.csv"))
-
-    runtime_plot = [r"""% Generated by scripts/postprocess.py.
-% Preamble also requires \usepgfplotslibrary{statistics}.
-\begin{tikzpicture}
-\begin{axis}[width=\dimexpr\linewidth-6mm\relax,height=4.5cm,
-xmin=1.5,xmax=12.5,xtick={2,3,4,5,6,7,8,9,10,11,12},
-xlabel={resolution $\eta$ (left: static; right: dynamic)},
-ymode=log,ylabel={Runtime (s)}]
-"""]
-    coverage = [["x", "successful", "failed", "not-run"]]
-    runtime_data = [["instance", "resolution", "mode", "time", "status"]]
-    for mode_index, (mode, name, color) in enumerate([("s", "static", "RWTHblue"), ("d", "dynamic", "RWTHbordeaux")]):
-        for resolution in range(2, 13):
-            times, counts = [], Counter()
-            for benchmark in included:
-                result = get_result(exec_data, storm.NAME, f"discr{resolution:03}{mode}", benchmark["id"])
-                status = "successful" if is_successful_result(result) else ("not-run" if result is None else "failed")
-                counts[status] += 1
-                if status == "successful":
-                    times.append(result["wallclock-time"])
-                runtime_data.append([benchmark["id"], resolution, name,
-                                     result.get("wallclock-time", "nan") if result else "nan", status])
-            position = resolution + (-0.18 if mode_index == 0 else 0.18)
-            runtime_plot.append(prepared_boxplot(times, position, color))
-            coverage.append([position, counts["successful"], counts["failed"], counts["not-run"]])
-        runtime_plot.append(r"\addlegendimage{area legend,draw=" + color + ",fill=" + color + "!20}\n"
-                            + r"\addlegendentry{" + name + "}\n")
-    runtime_plot.append(r"\end{axis}\end{tikzpicture}" + "\n")
-    write_plot("resolution_runtime_boxplot.tex", "".join(runtime_plot))
-    save_csv(runtime_data, os.path.join(OUT_DIR, "resolution_runtime_distribution.csv"))
-
-    coverage_plot = [r"""% Generated by scripts/postprocess.py.
-\begin{tikzpicture}
-\begin{axis}[width=\dimexpr\linewidth-6mm\relax,height=4.5cm,
-xmin=1.5,xmax=12.5,xtick={2,3,4,5,6,7,8,9,10,11,12},
-xlabel={resolution $\eta$ (left: static; right: dynamic)},
-ybar stacked,bar width=4pt,ymin=0,ymax=@TOTAL@,
-ytick={0,10,20,30,@TOTAL@},ylabel={Instances},legend columns=2]
-""".replace("@TOTAL@", str(len(included)))]
-    for status, color in [("successful", "RWTHgreen!65"), ("failed", "orange!75"), ("not-run", "black!20")]:
-        if status == "not-run" and not any(row[3] for row in coverage[1:]):
-            continue
-        coverage_plot.append(r"\addplot[fill=" + color + r",draw=none] table[x=x,y=" + status
-                            + r",col sep=space,row sep=\\]{" + latex_plot_table(coverage) + "};\n"
-                            + r"\addlegendentry{" + status + "}\n")
-    coverage_plot.append(r"\end{axis}\end{tikzpicture}" + "\n")
-    write_plot("resolution_run_outcomes_plot.tex", "".join(coverage_plot))
-    save_csv(coverage, os.path.join(OUT_DIR, "resolution_run_outcomes.csv"))
-
-    mode_numeric_max = 1000
-    mode_na, mode_limit = scatter_na_limits(
-        0.1, mode_numeric_max, logarithmic=True, gap_fraction=0.18
-    )
-    mode_data = [["instance", "resolution", "static-time", "dynamic-time", "status"]]
-    mode_preview = ["% Preview index: separate panel and legend files.\n",
-                    "\\input{general-plots/discretisation-mode-runtime/legend.tex}\\par\\medskip\n"]
-    for resolution in (2, 5, 12):
-        points = {kind: [["x", "y"]] for kind in ("prb", "rew")}
-        for benchmark in included:
-            inst_id = benchmark["id"]
-            static = get_result(exec_data, storm.NAME, f"discr{resolution:03}s", inst_id)
-            dynamic = get_result(exec_data, storm.NAME, f"discr{resolution:03}d", inst_id)
-            successes = (is_successful_result(static), is_successful_result(dynamic))
-            status = {(True, True): "paired", (True, False): "static-only",
-                      (False, True): "dynamic-only", (False, False): "neither"}[successes]
-            times = [result["wallclock-time"] if success else "nan"
-                     for result, success in zip((static, dynamic), successes)]
-            mode_data.append([inst_id, resolution, *times, status])
-            # n/a is a display coordinate in a separate edge strip, never a runtime.
-            display_times = [max(0.1, time) if success else mode_na
-                             for time, success in zip(times, successes)]
-            points[benchmark["property"]["type"]].append(display_times)
-        panel = []
-        for boundary in [
-            f"({mode_numeric_max},0.1) ({mode_numeric_max},{mode_limit})",
-            f"(0.1,{mode_numeric_max}) ({mode_limit},{mode_numeric_max})",
-        ]:
-            panel.append(r"\addplot[black!35,thin,no marks,forget plot] coordinates {" + boundary + "};\n")
-        for guide, style in [
-            (f"(0.1,0.1) ({mode_numeric_max},{mode_numeric_max})", "solid"),
-            (f"(0.1,0.2) ({mode_numeric_max / 2:g},{mode_numeric_max})", "densely dotted"),
-            (f"(0.2,0.1) ({mode_numeric_max},{mode_numeric_max / 2:g})", "densely dotted"),
-        ]:
-            panel.append(r"\addplot[black,thin," + style + r",no marks,forget plot] coordinates {" + guide + "};\n")
-        probability = scatter(points["prb"], "RWTHblue", "o")
-        reward = scatter(points["rew"], "RWTHbordeaux", "triangle")
-        no_legend = "".join(panel) + probability + reward
-        with_legend = ("".join(panel) + probability + r"\addlegendentry{Probability}" + "\n"
-                       + reward + r"\addlegendentry{Reward}" + "\n")
-        options = (scatter_log_ticks(0.1, mode_numeric_max, mode_na)
-                   + f"xmode=log,ymode=log,xmin=0.1,xmax={mode_limit},ymin=0.1,ymax={mode_limit},"
-                   # Three 38 mm panels leave 7.45 mm for two gaps in the B5 text block.
-                   + r"scale only axis=false,width=38mm,height=38mm,"
-                   + r"xticklabel style={font=\scriptsize},yticklabel style={font=\scriptsize},"
-                   + r"x label style={font=\scriptsize,yshift=0pt},"
-                   + r"y label style={font=\scriptsize,yshift=0pt},"
-                   + r"xlabel={Static (s)},ylabel={Dynamic (s)},title style={font=\small},"
-                   + rf"title={{Resolution $\eta={resolution}$}}")
-        write_plot(f"discretisation-mode-runtime/resolution-{resolution}.tex", axis_plot(options, with_legend))
-        write_plot(f"discretisation-mode-runtime/resolution-{resolution}-no-legend.tex", axis_plot(options, no_legend))
-        mode_preview.append("\\begin{minipage}{0.32\\linewidth}\\centering\n"
-                            + f"\\input{{general-plots/discretisation-mode-runtime/resolution-{resolution}-no-legend.tex}}\n"
-                            + "\\end{minipage}"
-                            + ("\\par\\medskip\n" if resolution == 12 else "\\hfill\n"))
-    write_plot("discretisation-mode-runtime/legend.tex", legend_plot([
-        ("only marks,color=RWTHblue,mark=o,mark options={fill=none},mark size=1.5pt", "Probability"),
-        ("only marks,color=RWTHbordeaux,mark=triangle,mark options={fill=none},mark size=1.5pt", "Reward"),
-    ]))
-    with open(os.path.join(GENERAL_PLOT_DIR, "discretisation-mode-runtime", "preview.tex"), "w") as preview:
-        preview.writelines(mode_preview)
-    save_csv(mode_data, os.path.join(OUT_DIR, "discretisation_mode_runtime_pairs.csv"))
-
-
-def save_underapproximation_question_outputs(exec_data, benchmark_instances, timelimit=1800):
-    from underapprox_visuals import save_outputs
-    save_outputs(sys.modules[__name__], exec_data, benchmark_instances, timelimit)
 
 
 def export_data(exec_data, benchmark_instances, export_kinds, prefix=""):
@@ -2674,14 +1633,6 @@ if __name__ == "__main__":
 
     for b_id, b_data in benchmark_instances.items():
         if "benchmark-set" not in b_data: print(b_data.keys())
-    def get_benchmark_subset(subset):
-        return {b_id: b_data for b_id, b_data in benchmark_instances.items() if b_data["benchmark-set"] in subset}
-
-
-    export_kinds = ["default", "scatter", "quantile", "html", "latexbenchmarks"] + [f"latext{t}" for t in storm.META_CONFIG_TIMELIMITS]
-    #export_data(exec_data, get_benchmark_subset(["drone"]), export_kinds, prefix="drone-")
-    #export_data(exec_data, get_benchmark_subset(["network2"]), export_kinds, prefix="netw2-")
-    #export_data(exec_data, get_benchmark_subset(["network-priorities2"]), export_kinds, prefix="netwp2-")
     save_dissertation_tables(exec_data, benchmark_instances, storm.META_CONFIG_TIMELIMITS[0])
     save_overapproximation_table(exec_data, benchmark_instances)
     save_underapproximation_tables(exec_data, benchmark_instances)

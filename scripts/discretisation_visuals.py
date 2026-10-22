@@ -1,26 +1,52 @@
-"""The two selected dissertation figures, generated from individual runs."""
+"""Selected discretisation figures, generated from individual runs."""
 import math
 import os
+from collections import Counter
 
 
-MODES = (("s", "static", "plotdiscr"), ("d", "dynamic", "plotclip"))
+MODES = (("s", "static", "plotdiscr"),)
 RESOLUTIONS = range(2, 13)
 
 
-def save_outputs(p, execution, instances, timelimit=1800):
-    """Export strict-improvement curves and paired resolution distributions.
+def relative_bound_gap(bound, reference):
+    """Percentage gap to the best observed bound, including both-zero bounds."""
+    scale = max(abs(bound), abs(reference))
+    return 100 * abs(bound - reference) / scale if scale else 0.0
+
+
+def run_status(p, run, timelimit):
+    """Keep timeout, kill and allocation failures distinct in audit data."""
+    if run is None:
+        return "not-run"
+    if run.get("timeout"):
+        return "timeout"
+    if -9 in run.get("return-codes", []):
+        return "killed"
+    if run.get("memout"):
+        return "memout"
+    if run.get("numerical-error"):
+        return "numerical-error"
+    if p.is_successful_result(run):
+        return "successful" if run["wallclock-time"] <= timelimit else "timeout"
+    return "failed"
+
+
+def save_outputs(p, execution, instances, timelimit=None):
+    """Export the static discretisation budget and resolution distributions.
 
     Only successful runs within the per-run limit contribute observations.
-    Normalisation uses the best gain across both modes and all resolutions;
-    instances without a positive gain are excluded from quality distributions.
+    Quality uses the relative gap to each instance's tightest successful bound
+    across all static resolutions. All instances are eligible.
     """
+    if timelimit is None:
+        timelimit = p.storm.META_CONFIG_TIMELIMITS[0]
     root = os.path.join(p.OUT_DIR, "discretisation-plots")
     os.makedirs(root, exist_ok=True)
     included = [b for b in p.benchmarks.INSTANCES if b["id"] in instances]
-    runs, baselines, best_gains = {}, {}, {}
+    runs, baselines, best_bounds, gaps = {}, {}, {}, {}
     first_improvements = {name: {} for _, name, _ in MODES}
     observations = [["instance", "resolution", "mode", "bound", "time", "status",
-                     "mdp-bound", "gain", "best-gain", "normalised-improvement"]]
+                     "mdp-bound", "gain", "best-bound", "relative-gap-percent"]]
 
     def value(run):
         return p.comparison_value(p.parse_result_value(run["result"])[1])
@@ -33,37 +59,38 @@ def save_outputs(p, execution, instances, timelimit=1800):
         mdp = p.get_result(execution, p.storm.NAME, "mdp", inst)
         if p.is_successful_result(mdp, timelimit):
             baselines[inst] = value(mdp)
-        gains = []
+        bounds = []
         for resolution in RESOLUTIONS:
             for mode, name, _ in MODES:
                 run = p.get_result(execution, p.storm.NAME, f"discr{resolution:03}{mode}", inst)
-                success = p.is_successful_result(run, timelimit)
-                status = "successful" if success else "not-run" if run is None else "failed"
+                status = run_status(p, run, timelimit)
+                success = status == "successful"
                 bound, runtime, improvement = None, None, None
                 if success:
                     runtime = run["wallclock-time"]
                     if not math.isfinite(runtime) or runtime <= 0:
                         raise ValueError(f"Invalid successful runtime: {run['id']}")
                     bound = value(run)
+                    bounds.append(bound)
                     if inst in baselines:
                         improvement = gain(benchmark, baselines[inst], bound)
-                        gains.append(improvement)
                         if improvement > 0:
                             first_improvements[name][inst] = min(
                                 runtime, first_improvements[name].get(inst, math.inf)
                             )
                 runs[inst, resolution, name] = (bound, runtime, status, improvement)
-        best_gains[inst] = max(gains, default=0)
+        tightest = max if benchmark["property"]["dir"] == "min" else min
+        best_bounds[inst] = tightest(bounds) if bounds else None
 
     for benchmark in included:
         inst = benchmark["id"]
         for resolution in RESOLUTIONS:
             for _, name, _ in MODES:
                 bound, runtime, status, improvement = runs[inst, resolution, name]
-                normalised = (100 * (improvement / best_gains[inst])
-                              if improvement is not None and best_gains[inst] > 0 else None)
+                gap = relative_bound_gap(bound, best_bounds[inst]) if bound is not None else None
+                gaps[inst, resolution, name] = gap
                 observations.append([inst, resolution, name, bound, runtime, status,
-                                     baselines.get(inst), improvement, best_gains[inst], normalised])
+                                     baselines.get(inst), improvement, best_bounds[inst], gap])
 
     def csv(filename, table):
         p.save_csv([["nan" if cell is None else cell for cell in row] for row in table],
@@ -85,11 +112,11 @@ def save_outputs(p, execution, instances, timelimit=1800):
                 + r"tick align=outside,axis line style={line width=0.4pt}," + "\n"
                 + options + "]\n" + body + r"\end{axis}\end{tikzpicture}" + "\n")
 
-    # Count an instance once, at its first strictly improving run in each mode.
+    # Count an instance once, at its first strictly improving static run.
     events = sorted({t for times in first_improvements.values() for t in times.values()})
     start = min(0.01, min(events, default=0.01))
-    budget = [["time", "static", "dynamic"], [start, 0, 0]]
-    counts = [0, 0]
+    budget = [["time", "static"], [start, 0]]
+    counts = [0]
     for time in events:
         budget.append([time, *counts])
         counts = [sum(t <= time for t in first_improvements[name].values())
@@ -105,86 +132,106 @@ def save_outputs(p, execution, instances, timelimit=1800):
     csv("discretisation_first_improvement.csv", first_rows)
     curves = []
     for _, name, color in MODES:
-        linestyle = "solid" if name == "static" else "dashed"
-        curves.append(r"\addplot[color=" + color + "," + linestyle + r",no marks] table["
+        curves.append(r"\addplot[color=" + color + r",solid,no marks] table["
                       + "x=time,y=" + name + r",col sep=space,row sep=\\]{"
-                      + p.latex_plot_table(budget) + "};\n"
-                      + r"\addlegendentry{" + name + "}\n")
+                      + p.latex_plot_table(budget) + "};\n")
     total = len(included)
     ticks = sorted({*range(0, total, 10), total})
+    time_ticks = [t for t in (0.01, 0.1, 1, 10, 100, 1000) if start <= t <= timelimit]
+    if timelimit not in time_ticks:
+        time_ticks.append(timelimit)
     budget_options = (
         f"xmode=log,xmin={start:g},xmax={timelimit},ymin=0,ymax={total + 1},\n"
         + "ytick={" + ",".join(map(str, ticks)) + "},\n"
-        + r"xtick={0.01,0.1,1,10,100,1000},"
-        + r"xticklabels={$10^{-2}$,$0.1$,$1$,$10$,$10^2$,$10^3$}," + "\n"
-        + r"xlabel={Time budget per run (s)},ylabel={Instances with a tighter bound},"
+        + "xtick={" + ",".join(f"{t:g}" for t in time_ticks) + "},"
+        + "xticklabels={" + ",".join(f"${t:g}$" for t in time_ticks) + "},\n"
+        + r"xlabel={time budget per run (s)},ylabel={instances with a tighter bound},"
     )
     write("improvement-budget.tex", axis(budget_options, "".join(curves)))
 
-    # Both panels use paired boxes: static on the left, dynamic on the right.
+    # One static box per resolution in each panel.
     summary = [["metric", "resolution", "mode", "eligible", "successful", "failed", "not-run",
+                "timeout", "killed", "allocation-memout", "numerical-error", "other-error",
                 "minimum", "q25", "median", "q75", "maximum"]]
-    cohort = {inst for inst, best in best_gains.items() if best > 0}
+    cohort = {b["id"] for b in included}
+    runtime_outcomes = {}
     for metric in ("quality", "runtime"):
-        selected = cohort if metric == "quality" else {b["id"] for b in included}
-        boxes, successes = [], {}
-        for mode_index, (_, name, color) in enumerate(MODES):
+        selected = cohort
+        boxes = []
+        for _, name, color in MODES:
             for resolution in RESOLUTIONS:
-                values, failed, not_run = [], 0, 0
+                values, counts = [], Counter()
                 for inst in sorted(selected):
                     bound, runtime, status, improvement = runs[inst, resolution, name]
+                    counts[status] += 1
                     if status == "successful":
                         values.append(runtime if metric == "runtime"
-                                      else 100 * (improvement / best_gains[inst]))
-                    elif status == "not-run":
-                        not_run += 1
-                    else:
-                        failed += 1
-                successes[resolution, name] = len(values)
-                position = resolution + (-0.18 if mode_index == 0 else 0.18)
-                boxes.append(p.prepared_boxplot(values, position, color))
+                                      else gaps[inst, resolution, name])
+                failed = sum(count for status, count in counts.items()
+                             if status not in ("successful", "not-run"))
+                if metric == "runtime":
+                    runtime_outcomes[resolution, name] = counts
+                boxes.append(p.prepared_boxplot(values, resolution, color))
                 quantiles = ([min(values), *[p.plot_quantile(values, q) for q in (0.25, 0.5, 0.75)], max(values)]
                              if values else [None] * 5)
-                summary.append([metric, resolution, name, len(selected), len(values), failed, not_run, *quantiles])
-        labels = [r"\node[anchor=south west,font=\scriptsize] at (axis description cs:0,1.14) {"
-                  + f"Successful runs (static/dynamic; out of {len(selected)})" + "};\n"]
-        for resolution in RESOLUTIONS:
-            x = (resolution - 1.5) / 11
-            labels.append(r"\node[anchor=south,font=\scriptsize,inner sep=1pt] at (axis description cs:"
-                          + f"{x},1.025) {{{successes[resolution, 'static']}/{successes[resolution, 'dynamic']}}};\n")
-        options = (r"xmin=1.5,xmax=12.5,xtick={2,3,4,5,6,7,8,9,10,11,12},"
-                   + r"xlabel={Resolution $\eta$},clip=false," + "\n")
+                summary.append([metric, resolution, name, len(selected), len(values), failed, counts["not-run"],
+                                counts["timeout"], counts["killed"], counts["memout"],
+                                counts["numerical-error"], counts["failed"], *quantiles])
+        height = 3.2 if metric == "quality" else 2.2
+        options = (f"height={height:g}cm," + r"xmin=1.5,xmax=12.5,xtick={2,3,4,5,6,7,8,9,10,11,12},"
+                   + r"xlabel={resolution $\eta$},clip=false," + "\n")
         if metric == "quality":
-            options += r"ymin=-3,ymax=103,ytick={0,25,50,75,100},ylabel={Improvement reached (\%)},"
+            options += r"ymin=-3,ymax=103,ytick={0,25,50,75,100},ylabel={relative gap (\%)},"
         else:
-            options += (r"ymode=log,ymin=0.03,ymax=2000,ylabel={Runtime (s)},"
-                        + r"ytick={0.1,1,10,100,1000},"
-                        + r"yticklabels={$0.1$,$1$,$10$,$10^2$,$10^3$},")
-        body = "".join(boxes + labels)
-        legend = "".join(r"\addlegendimage{area legend,draw=" + color + ",fill=" + color + "!20}\n"
-                         + r"\addlegendentry{" + name + "}\n" for _, name, color in MODES)
-        # The shared legend is included by resolution-preview.tex; standalone
-        # panels place their own legend below to avoid the success-count labels.
+            time_ticks = [10 ** e for e in range(-1, math.floor(math.log10(timelimit)) + 1)]
+            if timelimit not in time_ticks:
+                time_ticks.append(timelimit)
+            options += (r"ymode=log,ymin=0.03,ylabel={runtime (s)},"
+                        + "ytick={" + ",".join(f"{t:g}" for t in time_ticks) + "},"
+                        + "yticklabels={" + ",".join(f"${t:g}$" for t in time_ticks) + "},")
+            options += f"ymax={timelimit},"
+        body = "".join(boxes)
         write(f"resolution-{metric}-no-legend.tex", axis(options, body))
-        write(f"resolution-{metric}.tex", axis(
-            options + r"legend style={at={(0.5,-0.32)},anchor=north},", body + legend))
     csv("discretisation_resolution_summary.csv", summary)
-    write("legend.tex", r"""\begin{tikzpicture}[scale=0.75,transform shape]
-\filldraw[draw=plotdiscr,fill=plotdiscr!20] (0,0) rectangle (0.35,0.18);
-\node[anchor=west,font=\small] at (0.4,0.09) {static};
-\filldraw[draw=plotclip,fill=plotclip!20] (1.8,0) rectangle (2.15,0.18);
-\node[anchor=west,font=\small] at (2.2,0.09) {dynamic};
-\end{tikzpicture}
-""")
-    write("resolution-preview.tex", r"""% Preamble requires pgfplots and \usepgfplotslibrary{statistics}.
-\input{discretisation-plots/legend.tex}\par\medskip
-\input{discretisation-plots/resolution-quality-no-legend.tex}\par\bigskip
-\input{discretisation-plots/resolution-runtime-no-legend.tex}\par
-""", styled=False)
+    # One outcome plot uses the full runtime cohort for both distributions.
+    outcome_styles = (
+        ("successful", ("successful",), "plotcut!55"),
+        ("TO", ("timeout",), "orange!80"),
+        ("MO", ("killed", "memout"), "plotclip!75"),
+        ("ERR", ("numerical-error", "failed"), "black!55"),
+        ("n/a", ("not-run",), "black!10"),
+    )
+    active = [entry for entry in outcome_styles
+              if any(sum(counts[s] for s in entry[1]) for counts in runtime_outcomes.values())]
+    bars = []
+    for resolution in RESOLUTIONS:
+        for _, name, _ in MODES:
+            counts = runtime_outcomes[resolution, name]
+            centre = resolution
+            bottom = 0
+            for _, statuses, color in active:
+                count = sum(counts[s] for s in statuses)
+                if count:
+                    bars.append(r"\path[fill=" + color + r",draw=white,line width=0.15pt] "
+                                + f"(axis cs:{centre - 0.28:g},{bottom}) rectangle "
+                                + f"(axis cs:{centre + 0.28:g},{bottom + count});\n")
+                bottom += count
+            assert bottom == total
+    for label, _, color in active:
+        bars.append(r"\addlegendimage{area legend,fill=" + color + r",draw=black!30}" + "\n"
+                    + r"\addlegendentry{" + label + "}\n")
+    outcome_options = (
+        r"height=1.2cm,xmin=1.5,xmax=12.5,xtick={2,3,4,5,6,7,8,9,10,11,12},"
+        + f"ymin=0,ymax={total},enlarge y limits=false,"
+        + "ytick={" + ",".join(map(str, sorted({0, total // 2, total}))) + "},"
+        + r"xlabel={resolution $\eta$},ylabel={instances},"
+        + r"grid=none,ymajorgrids=true,clip=false,"
+        + r"legend style={at={(0.5,1.04)},anchor=south},"
+    )
+    write("resolution-outcomes.tex", axis(outcome_options, "".join(bars)))
     return {"instances": total, "quality-cohort": len(cohort),
             "missing-mdp": total - len(baselines),
-            "static-improved": len(first_improvements["static"]),
-            "dynamic-improved": len(first_improvements["dynamic"])}
+            "static-improved": len(first_improvements["static"])}
 
 
 if __name__ == "__main__":

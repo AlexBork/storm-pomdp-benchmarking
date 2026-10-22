@@ -1,4 +1,4 @@
-"""Export the eight selected figures as self-contained, copyable TikZ pictures."""
+"""Export the selected figures as self-contained, copyable TikZ pictures."""
 import argparse
 from pathlib import Path
 import re
@@ -101,18 +101,13 @@ def export_pictures(data_dir=Path("data"), output_dir=None):
         "combined-bounds": fragment("combined-bounds-plots/interval-tightness.tex"),
         "discretisation-exact-reference": fragment("combined-bounds-plots/exact-cut-discr-error.tex"),
     }
-    resolution_legend = r"""\addlegendimage{area legend,draw=plotdiscr,fill=plotdiscr!20}
-\addlegendentry{static}
-\addlegendimage{area legend,draw=plotclip,fill=plotclip!20}
-\addlegendentry{dynamic}
-"""
-    top = axis("discretisation-plots/resolution-quality-no-legend.tex",
-               r"name=quality,anchor=north west,scale only axis,width=0.83\linewidth,"
-               r"legend style={at={(0.5,1.3)},anchor=south}", resolution_legend)
-    bottom = axis("discretisation-plots/resolution-runtime-no-legend.tex",
-                  r"at={(quality.south west |- qualitybox.south)},anchor=north west,"
-                  r"yshift=-4\baselineskip,scale only axis,width=0.83\linewidth")
-    pictures["discretisation-resolution"] = scope("qualitybox", top) + bottom
+    for metric in ("quality", "runtime"):
+        pictures[f"discretisation-resolution-{metric}"] = axis(
+            f"discretisation-plots/resolution-{metric}-no-legend.tex",
+            r"scale only axis,width=0.83\linewidth")
+    pictures["discretisation-resolution-outcomes"] = axis(
+        "discretisation-plots/resolution-outcomes.tex",
+        r"scale only axis,width=0.83\linewidth")
 
     drone_legend = r"""\addlegendimage{only marks,color=plotcut,mark=o,mark options={fill=white}}
 \addlegendentry{\textsc{cut}}
@@ -146,6 +141,8 @@ def export_pictures(data_dir=Path("data"), output_dir=None):
         assert picture.count(r"\end{tikzpicture}") == 1
         assert r"\input" not in picture and r"\POMDP" not in picture
         (output_dir / f"{name}.tex").write_text(picture)
+    # Replaced by the independent quality and runtime pictures.
+    (output_dir / "discretisation-resolution.tex").unlink(missing_ok=True)
     return {"folder": str(output_dir), "tikzpictures": len(pictures)}
 
 
@@ -186,9 +183,11 @@ def main():
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
-    print(generate_plots(p, p.load_json(args.data_dir / "execution-data.json"),
-                         p.load_json(args.data_dir / "benchmark-data.json"),
-                         args.data_dir, args.output_dir))
+    execution = p.load_json(args.data_dir / "execution-data.json")
+    instances = p.load_json(args.data_dir / "benchmark-data.json")
+    # Cached data may predate the current study's configuration selection.
+    p.process_meta_configs(execution, instances)
+    print(generate_plots(p, execution, instances, args.data_dir, args.output_dir))
 
 
 if __name__ == "__main__":

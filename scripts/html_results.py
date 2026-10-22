@@ -45,6 +45,8 @@ def runtime_status(p, run):
         return "killed"
     if run.get("memout"):
         return "memout"
+    if run.get("numerical-error"):
+        return "numerical-error"
     if p.is_successful_result(run):
         return "successful"
     return "failed"
@@ -121,6 +123,12 @@ def save_results(p, execution, instances, logdirs=(), output_dir=None):
     """Export actual configurations only; derived selections are not measured runs."""
     root = Path(output_dir) if output_dir is not None else Path(p.OUT_DIR) / "html"
     (root / "logs").mkdir(parents=True, exist_ok=True)
+    # Remove generated pages for retired configurations; source logs stay intact.
+    for tool in p.TOOLS:
+        for config in getattr(tool, "RETIRED_CONFIG_IDS", ()):
+            for obsolete in (root / "logs").glob(f"{tool.NAME}.{config}.*"):
+                if obsolete.suffix == ".html" or obsolete.name.endswith(".log.gz"):
+                    obsolete.unlink()
     assets = Path(__file__).parent / "html_assets"
     for asset in ("results.css", "results.js"):
         shutil.copyfile(assets / asset, root / asset)
@@ -154,6 +162,7 @@ def save_results(p, execution, instances, logdirs=(), output_dir=None):
         'MDP values are shown as bounds on the POMDP optimum. '
         'Highlighting is the same in every display view. Killed means SIGKILL without a '
         'recorded timeout; it is separate from an identified memory error. '
+        'Numerical-error means the clipping LP correctness check rejected the computation. '
         'Missing values are unavailable measurements, not zeros. Derived best-configuration '
         'selections are excluded from the measured runs and runtime total.</p></details>',
         '<div class="controls"><label>Filter benchmarks <input id="filter" type="search" '

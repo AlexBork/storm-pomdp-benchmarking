@@ -38,13 +38,15 @@ base_cfg["supported-model-types"] = ["pomdp"]
 base_cfg["supported-model-formalisms"] = ["prism"]
 
 for i in range(2, 13):
-    for mode in ["static", "dynamic"]:
-        discr_cfg = copy.deepcopy(base_cfg)
-        discr_cfg["id"] = f"discr{i:03}{mode[0]}"
-        discr_cfg["family"] = "discretisation"
-        discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", f"--triangulationmode {mode}"]
-        discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, triangulation mode {mode}"]
-        CONFIGS.append(discr_cfg)
+    discr_cfg = copy.deepcopy(base_cfg)
+    discr_cfg["id"] = f"discr{i:03}s"
+    discr_cfg["family"] = "discretisation"
+    discr_cfg["cmd"] += ["--belief-exploration discretize", f"--resolution {i}", "--triangulationmode static"]
+    discr_cfg["notes"] += [f"Over-approximation with discretization, resolution {i}, static triangulation"]
+    CONFIGS.append(discr_cfg)
+
+# Archived dynamic-mode logs remain readable as files but are outside the study.
+RETIRED_CONFIG_IDS = {f"discr{i:03}d" for i in range(2, 13)}
 
 for i in range(8,33):
     cutoff_cfg = copy.deepcopy(base_cfg)
@@ -96,7 +98,7 @@ CONFIGS.append(fully_obs)
 # CONFIGS.append(unf_fully_obs)
 
 CONFIGS = sorted(CONFIGS, key=lambda x: x["id"])
-META_CONFIG_TIMELIMITS = [1800]
+META_CONFIG_TIMELIMITS = [900]
 BASE_CONFIGS = ["discr", "cut", "clip"] #, "unbc", "unbd"]
 META_CONFIGS = []
 for timelimit in META_CONFIG_TIMELIMITS:
@@ -157,6 +159,7 @@ def try_parse_constructed_belief_mdp(log, start, out_dict):
     return pos1 + match.end()
 
 def parse_logfile(log, inv):
+    inv["numerical-error"] = "Grid clipping LP returned a clipping value of zero for distinct beliefs" in log
     unsupported_messages = [] # add messages that indicate that the invocation is not supported
     inv["not-supported"] = contains_any_of(log, unsupported_messages)
     memout_messages = [] # add messages that indicate that the invocation is not supported
@@ -167,7 +170,7 @@ def parse_logfile(log, inv):
     inv["expected-error"] = contains_any_of(log, known_error_messages)
     if inv["not-supported"] or inv["expected-error"]: return
     if len(inv["return-codes"]) != 1 or inv["return-codes"][0] != 0:
-        if not inv["timeout"] and not inv["memout"]: print("WARN: Unexpected return code(s): {} in {}".format(inv["return-codes"], inv["id"]))
+        if not inv["timeout"] and not inv["memout"] and not inv["numerical-error"]: print("WARN: Unexpected return code(s): {} in {}".format(inv["return-codes"], inv["id"]))
 
     pos = try_parse_duration(log, 0, "Time for model construction: ", inv, "model-building-time")
     if pos == 0: 

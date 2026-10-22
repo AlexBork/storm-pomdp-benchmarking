@@ -15,7 +15,9 @@ DRONE_SERIES = (
 )
 
 
-def save_outputs(p, execution, instances, timelimit=1800):
+def save_outputs(p, execution, instances, timelimit=None):
+    if timelimit is None:
+        timelimit = p.storm.META_CONFIG_TIMELIMITS[0]
     root = os.path.join(p.OUT_DIR, "underapprox-plots")
     os.makedirs(root, exist_ok=True)
     included = [b for b in p.benchmarks.INSTANCES if b["id"] in instances]
@@ -69,25 +71,40 @@ def save_outputs(p, execution, instances, timelimit=1800):
     # Matched parameters compare exploration methods, with failures explicitly
     # outside the numeric runtime region. Clamping affects display only.
     lower = 0.1
-    na, limit = p.scatter_na_limits(lower, timelimit, logarithmic=True, gap_fraction=0.14)
+    categories = [("timeout", "TO"), ("memout", "MO"), ("error", "ERR")]
+    if any(run(b["id"], method, MATCHED_EXPONENT) is None
+           for b in included for method, *_ in METHODS):
+        categories.append(("not-run", "n/a"))
+    # Equal log-space distances are layout slots, never measured runtimes.
+    category_step = 0.38
+    category_positions = {
+        name: timelimit * 10 ** (category_step * index)
+        for index, (name, _) in enumerate(categories, 1)
+    }
+    limit = timelimit * 10 ** (category_step * (len(categories) + 0.5))
     points = {kind: [["cut", "clip"]] for kind in ("prb", "rew")}
     matched = [["instance", "objective", "cut-config", "clip-config", "cut-time", "clip-time",
-                "cut-bound", "clip-bound", "cut-status", "clip-status"]]
+                "cut-bound", "clip-bound", "cut-status", "clip-status",
+                "cut-plot-status", "clip-plot-status", "cut-plot-position", "clip-plot-position"]]
     successes = {"cut": 0, "clip": 0}
     for benchmark in included:
         results = [run(benchmark["id"], method, MATCHED_EXPONENT) for method, *_ in METHODS]
-        times, bounds, display = [], [], []
+        times, bounds, display, plot_statuses = [], [], [], []
         for (method, *_), result in zip(METHODS, results):
             time = runtime(result) if success(result) else None
             bound = p.parse_result_value(result["result"])[1] if success(result) else None
             times.append(time)
             bounds.append(bound)
-            display.append(max(lower, time) if time is not None else na)
+            outcome = status(result)
+            category = ("memout" if outcome in ("killed", "memout") else outcome
+                        if outcome in ("successful", "timeout", "not-run") else "error")
+            plot_statuses.append(category)
+            display.append(max(lower, time) if time is not None else category_positions[category])
             successes[method] += time is not None
         points[benchmark["property"]["type"]].append(display)
         matched.append([benchmark["id"], benchmark["property"]["type"] + benchmark["property"]["dir"],
                         f"cut{MATCHED_EXPONENT:02}", f"clip{MATCHED_EXPONENT:02}res{CLIP_RESOLUTION:02}",
-                        *times, *bounds, *map(status, results)])
+                        *times, *bounds, *map(status, results), *plot_statuses, *display])
     csv("matched-runtime.csv", matched)
     guides = []
     for line in (f"({timelimit},{lower}) ({timelimit},{limit})",
@@ -105,10 +122,20 @@ def save_outputs(p, execution, instances, timelimit=1800):
                       + r" table[x=cut,y=clip,col sep=space,row sep=\\]{"
                       + p.latex_plot_table(points[kind]) + "};\n"
                       + r"\addlegendentry{" + label + "}\n")
+    category_ticks = ",".join(f"{category_positions[name]:.12g}" for name, _ in categories)
+    category_labels = ",".join(label for _, label in categories)
+    failure_tick_options = "".join(
+        f"extra {axis} ticks={{{category_ticks}}},"
+        + f"extra {axis} tick labels={{{category_labels}}},"
+        + f"extra {axis} tick style={{grid=major,minor tick num=0,"
+        + "major grid style={draw=black!15,line width=0.25pt,solid}},"
+        for axis in ("x", "y")
+    )
     scatter_options = (p.LATEX_SCATTER_OPTIONS
-                       + r"width=7cm,height=7cm,xmode=log,ymode=log,"
+                       + r"width=0.83\linewidth,height=0.83\linewidth,xmode=log,ymode=log,"
                        + f"xmin={lower},xmax={limit},ymin={lower},ymax={limit},"
-                       + p.scatter_log_ticks(lower, 1000, na)
+                       + p.scatter_log_ticks(lower, timelimit)
+                       + failure_tick_options
                        + r"xlabel={CUT runtime (s)},ylabel={CLIP runtime (s)},")
     write("matched-runtime.tex", axis(scatter_options, "".join(guides)))
 
@@ -147,7 +174,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
                                  resolution, bound, time, states,
                                  result.get("wallclock-time") if result else None, status(result), outcome])
     csv("drone-threshold.csv", observations)
-    count_text = (f"Successful thresholds: CUT {example_successes['cut', None]}/25; "
+    count_text = (f"successful thresholds: CUT {example_successes['cut', None]}/25; "
                   + rf"CLIP $\eta=2$: {example_successes['clip', 2]}/25; "
                   + rf"CLIP $\eta=3$: {example_successes['clip', 3]}/25")
     counts = (r"\node[anchor=south west,font=\scriptsize] at (axis description cs:0,1.04) {"
@@ -169,7 +196,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
     outcome_styles = (
         ("successful", "plotcut!55", "successful"),
         ("timeout", "orange!80", "TO"),
-        ("memout", "plotclip!75", r"MO$^*$"),
+        ("memout", "plotclip!75", "MO"),
         ("failed", "black!55", "other failure"),
         ("not-run", "black!10", "not run"),
     )
@@ -230,7 +257,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
         r"xmin=7.5,xmax=32.5,xtick={8,12,16,20,24,28,32},"
         + r"xticklabels={$2^8$,$2^{12}$,$2^{16}$,$2^{20}$,$2^{24}$,$2^{28}$,$2^{32}$},"
         + "minor xtick={" + ",".join(str(e) for e in range(8, 33) if e not in (8, 12, 16, 20, 24, 28, 32)) + "},"
-        + r"xlabel={Exploration threshold $\tau$},tick align=outside,"
+        + r"xlabel={exploration threshold $\tau$},tick align=outside,"
         + r"major tick length=2pt,minor tick length=1.3pt,"
         + r"tick style={black,line width=0.3pt},"
         + r"xticklabel style={font=\footnotesize},"
@@ -256,7 +283,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
     bars_options = (threshold_axis + r"width=\dimexpr\linewidth-6mm\relax,height=4.5cm,"
                     + f"ymin=0,ymax={total},enlarge y limits=false,"
                     + "ytick={" + ",".join(map(str, sorted({*range(0, total, 10), total}))) + "},"
-                    + r"ylabel={Benchmark instances},ybar stacked,bar width=7pt,"
+                    + r"ylabel={benchmark instances},ybar stacked,bar width=7pt,"
                     + r"ymajorgrids=true,major grid style={black!15,line width=0.25pt},")
     bars = []
     for outcome, color, label in active:
@@ -325,7 +352,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
     gap_options = (threshold_axis + r"width=\dimexpr\linewidth-6mm\relax,height=4.5cm,"
                    + f"ymin=-3,ymax={gap_upper + 3},"
                    + "ytick={" + ",".join(str(t) for t in range(0, gap_upper + 1, 25)) + "},"
-                   + r"minor y tick num=1,ylabel={Gap to best CUT bound (\%)},"
+                   + r"minor y tick num=1,ylabel={gap to best CUT bound (\%)},"
                    + r"ymajorgrids=true,major grid style={black!15,line width=0.25pt},")
     write("cut-bound-gap.tex", "% Preamble also requires \\usepgfplotslibrary{statistics}.\n"
           + axis(gap_options, "".join(boxplots)))
@@ -355,24 +382,27 @@ def save_outputs(p, execution, instances, timelimit=1800):
               + "xtick={" + ",".join(str(2 ** k) for k in ticks) + "},"
               + "xticklabels={" + ",".join(f"$2^{{{k}}}$" for k in ticks) + "},"
               + threshold_minor_ticks(ticks)
-              + r"xlabel={Exploration threshold $\tau$},unbounded coords=jump,clip=false,")
+              + r"xlabel={exploration threshold $\tau$},unbounded coords=jump,clip=false,")
     failure_groups = [outcome for outcome in ("timeout", "memout", "failed")
                       if any(groups[outcome] for groups in failures.values())]
     numeric_fraction = 0.94 - 0.11 * len(failure_groups)
     for metric in ("bound", "time", "states"):
         options = common
         if metric == "bound":
-            options += r"ymin=0.58,ymax=1.015,ytick={0.6,0.7,0.8,0.9,1},ylabel={Probability lower bound},"
+            options += r"ymin=0.58,ymax=1.015,ytick={0.6,0.7,0.8,0.9,1},ylabel={probability lower bound},"
             options += r"minor ytick={0.65,0.75,0.85,0.95},"
             numeric_lower, numeric_upper, logarithmic = 0.58, 1.015, False
         elif metric == "time":
-            options += (r"ymode=log,ymin=0.1,ymax=2000,ylabel={Runtime (s)},"
-                        + r"ytick={0.1,1,10,100,1000},"
-                        + r"yticklabels={$0.1$,$1$,$10$,$10^2$,$10^3$},")
-            options += log_y_minor_ticks(-1, 3, 2000)
-            numeric_lower, numeric_upper, logarithmic = 0.1, 2000, True
+            time_ticks = [10 ** e for e in range(-1, math.floor(math.log10(timelimit)) + 1)]
+            if timelimit not in time_ticks:
+                time_ticks.append(timelimit)
+            options += (r"ymode=log,ymin=0.1,ylabel={runtime (s)},"
+                        + "ytick={" + ",".join(f"{t:g}" for t in time_ticks) + "},"
+                        + "yticklabels={" + ",".join(f"${t:g}$" for t in time_ticks) + "},")
+            options += log_y_minor_ticks(-1, math.floor(math.log10(timelimit)), timelimit)
+            numeric_lower, numeric_upper, logarithmic = 0.1, timelimit, True
         elif metric == "states":
-            options += (r"ymode=log,ymin=100,ymax=100000000,ylabel={Belief-MDP states},"
+            options += (r"ymode=log,ymin=100,ymax=100000000,ylabel={belief-MDP states},"
                         + r"ytick={100,1000,10000,100000,1000000,10000000,100000000},"
                         + r"yticklabels={$10^2$,$10^3$,$10^4$,$10^5$,$10^6$,$10^7$,$10^8$},")
             options += log_y_minor_ticks(2, 7, 100000000)
@@ -388,7 +418,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
         options += f"ymax={level(1)},enlarge y limits=false,"
         options += ("extra y ticks={" + ",".join(f"{positions[o]:.12g}" for o in failure_groups) + "},"
                     + "extra y tick labels={" + ",".join(
-                        {"timeout": "TO", "memout": r"MO$^*$", "failed": "ERR"}[o] for o in failure_groups) + "},"
+                        {"timeout": "TO", "memout": "MO", "failed": "ERR"}[o] for o in failure_groups) + "},"
                     + r"extra y tick style={grid=none,minor tick num=0},")
         curves, legend = [], []
         for method, resolution, color, mark, label in DRONE_SERIES:
@@ -401,7 +431,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
         metric_counts = counts
         if metric == "states":
             metric_counts = (r"\node[anchor=south west,font=\scriptsize] at (axis description cs:0,1.04) {"
-                             + f"Available state counts: CUT {state_observations['cut', None]}/25; "
+                             + f"available state counts: CUT {state_observations['cut', None]}/25; "
                              + rf"CLIP $\eta=2$: {state_observations['clip', 2]}/25; "
                              + rf"CLIP $\eta=3$: {state_observations['clip', 3]}/25"
                              + "};\n")
@@ -430,7 +460,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
                        + r"xticklabels={$2^8$,$2^{16}$,$2^{24}$,$2^{32}$},"
                        + threshold_minor_ticks((8, 16, 24, 32))
                        + r"xticklabel style={font=\scriptsize},yticklabel style={font=\scriptsize},"
-                       + r"xlabel={Threshold $\tau$},")
+                       + r"xlabel={threshold $\tau$},")
             if metric == "states":
                 compact += r"ylabel={MDP states},"
             write(f"drone-threshold-{metric}-compact.tex", axis(options + compact, "".join(curves)))

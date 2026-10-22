@@ -10,7 +10,9 @@ SERIES = (
 )
 
 
-def save_outputs(p, execution, instances, timelimit=1800):
+def save_outputs(p, execution, instances, timelimit=None):
+    if timelimit is None:
+        timelimit = p.storm.META_CONFIG_TIMELIMITS[0]
     root = os.path.join(p.OUT_DIR, "combined-bounds-plots")
     os.makedirs(root, exist_ok=True)
     included = [b for b in p.benchmarks.INSTANCES if b["id"] in instances]
@@ -117,8 +119,8 @@ def save_outputs(p, execution, instances, timelimit=1800):
                + "xtick={" + ",".join(f"{t:g}" for t in ticks) + "},\n"
                + "xticklabels={" + ",".join(f"${t:g}$" for t in ticks) + "},\n"
                + "ytick={" + ",".join(map(str, sorted({0, 10, 20, 30, len(included)}))) + "},\n"
-               + r"xlabel={Relative interval-width tolerance (\%)},"
-               + r"ylabel={Instances within tolerance},"
+               + r"xlabel={interval-width tolerance (\%)},"
+               + r"ylabel={instances within tolerance},"
                + r"grid=major,major grid style={draw=black!15,line width=0.25pt},"
                + r"tick align=outside,legend columns=1,")
     body = (r"\begin{tikzpicture}\begin{axis}[" + "\n" + options + "]\n"
@@ -178,7 +180,7 @@ def save_outputs(p, execution, instances, timelimit=1800):
                + "yticklabels={" + ",".join("{" + label + "}" for label in labels) + "},\n"
                + "xtick={" + ",".join(str(i) for i in range(0, upper + 1, 25)) + "},"
                + r"yticklabel style={font=\scriptsize},ytick style={draw=none},"
-               + r"xlabel={Discretisation error against exact CUT value (\%)},"
+               + r"xlabel={relative discretisation error (\%)},"
                + r"xmajorgrids=true,major grid style={draw=black!15,line width=0.25pt},"
                + r"tick align=outside,enlarge y limits=false,")
     write("exact-cut-discr-error.tex", "".join(measured)

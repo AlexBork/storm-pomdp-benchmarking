@@ -35,7 +35,7 @@ td.best, tbody tr:hover td.best { background: #d7efdb; font-weight: 600; }
 .runtime { color: #5e6871; }
 .states { display: none; }
 .timeout a, .memout a, .killed a { color: #986000; }
-.failed a { color: #b32632; }
+.failed a, .numerical-error a { color: #b32632; }
 .missing, .unsupported a { color: #77818b; }
 [hidden] { display: none !important; }
 body[data-metric="runtime"] .bound { display: none; }
